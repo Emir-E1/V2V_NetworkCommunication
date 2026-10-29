@@ -1,0 +1,3 @@
+﻿# Git ne garde pas les dossiers vides : ce fichier fait exister le dossier.
+# Étape 2 : graphe routier (intersections, tronçons, sens unique, Dijkstra/A*).
+# À supprimer dès que le premier .cpp arrive ici.

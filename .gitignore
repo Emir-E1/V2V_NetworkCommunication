@@ -1,0 +1,8 @@
+# Fichiers que Git doit ignorer (ne jamais les pousser sur GitHub).
+
+# Dossier de compilation : propre à chaque PC, régénéré par CMake.
+build/
+# Réglages locaux de Qt Creator (chemins propres à chaque membre).
+CMakeLists.txt.user
+# Réglages locaux de VS Code.
+.vscode/
