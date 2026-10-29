@@ -5,12 +5,17 @@
 #include <QElapsedTimer>
 #include <QTimer>
 
+#include <algorithm>
+#include <cmath>
+
 namespace
 {
 // Durée d'un pas, en secondes de temps réel : 40 ms = 25 images par seconde,
 // la fluidité visée par le cahier des charges.
 constexpr int PAS_MS = 40;
 constexpr double PAS_S = PAS_MS / 1000.0;
+// Intervalle minimal entre deux recalculs (secondes simulées) : protège l'échéancier.
+constexpr double INTERVALLE_MIN_S = 0.05;
 }
 
 MoteurSimulation::MoteurSimulation(QObject *parent)
@@ -34,9 +39,10 @@ void MoteurSimulation::demarrer(const GrapheRoutier &graphe, const ParametresSim
     if (&graphe != &m_graphe)
         m_graphe = graphe;
     m_parametres = parametres;
-    m_intervalleRecalcul = intervalleRecalcul;
-    m_couleursGlouton.clear();
-    m_couleursWelshPowell.clear();
+    m_intervalleRecalcul = std::isfinite(intervalleRecalcul) ? std::max(INTERVALLE_MIN_S, intervalleRecalcul)
+                                                             : 1.0;  // jamais nul (voir pas())
+    for (QVector<int> &couleurs : m_couleurs)
+        couleurs.clear();
     m_aretes.clear();
     m_aretesAEnvoyer = false;
 
@@ -89,7 +95,10 @@ void MoteurSimulation::setRayon(double rayon)
 
 void MoteurSimulation::setIntervalleRecalcul(double secondes)
 {
-    m_intervalleRecalcul = secondes;
+    if (!std::isfinite(secondes))
+        return;
+    m_intervalleRecalcul = std::max(INTERVALLE_MIN_S, secondes);  // jamais nul (voir pas())
+    secondes = m_intervalleRecalcul;
     m_prochainRecalcul = m_simulation.temps() + secondes;
 }
 
@@ -115,7 +124,11 @@ void MoteurSimulation::pas()
     bool recalcule = false;
     if (m_simulation.temps() >= m_prochainRecalcul) {
         recalculer();
-        m_prochainRecalcul = m_simulation.temps() + m_intervalleRecalcul;
+        // Échéancier fixe (1 s, 2 s, 3 s... de temps simulé) : partir de l'instant réel du
+        // recalcul ferait dériver les dates quand un pas de temps dépasse l'échéance
+        // (simulation accélérée). Prochaine échéance = premier multiple de l'intervalle
+        // après le temps actuel (les échéances déjà passées sont sautées d'un coup).
+        m_prochainRecalcul = (std::floor(m_simulation.temps() / m_intervalleRecalcul) + 1.0) * m_intervalleRecalcul;
         recalcule = true;
     }
     envoyerInstantane(recalcule, false);
@@ -145,17 +158,17 @@ void MoteurSimulation::recalculer()
 
     // Étape 5 : chaque algorithme colore le MÊME graphe ; on vérifie la validité
     // et on mesure la stabilité par rapport à son propre résultat précédent.
-    const auto colorer = [&](Coloration::Algo algo, QVector<int> &precedentes, MesureAlgo &resultat) {
+    for (Coloration::Algo algo : Coloration::TOUS_LES_ALGOS) {
+        const int i = static_cast<int>(algo);
         const ResultatColoration coloration = Coloration::colorer(voisins, algo);
+        MesureAlgo &resultat = mesure.algos[i];
         resultat.couleurs = coloration.nombreCouleurs;
         resultat.dureeMs = coloration.dureeMs;
         resultat.valide = Coloration::estValide(voisins, coloration.couleurs, &resultat.conflits);
         // Premier recalcul : rien à comparer, on considère l'allocation stable.
-        resultat.stabilite = precedentes.isEmpty() ? 1.0 : Coloration::stabilite(precedentes, coloration.couleurs);
-        precedentes = coloration.couleurs;
-    };
-    colorer(Coloration::Algo::Glouton, m_couleursGlouton, mesure.glouton);
-    colorer(Coloration::Algo::WelshPowell, m_couleursWelshPowell, mesure.welshPowell);
+        resultat.stabilite = m_couleurs[i].isEmpty() ? 1.0 : Coloration::stabilite(m_couleurs[i], coloration.couleurs);
+        m_couleurs[i] = coloration.couleurs;
+    }
 
     m_aretes = m_interference.aretes();
     emit nouvelleMesure(mesure);
@@ -184,7 +197,7 @@ void MoteurSimulation::envoyerInstantane(bool nouvellesAretes, bool forcer)
         instantane.positions.append(v.position);
         sommeVitesses += v.vitesse;
     }
-    instantane.couleurs = (m_algoAffiche == Coloration::Algo::Glouton) ? m_couleursGlouton : m_couleursWelshPowell;
+    instantane.couleurs = m_couleurs[static_cast<int>(m_algoAffiche)];
     instantane.nouvellesAretes = nouvellesAretes;
     if (nouvellesAretes)
         instantane.aretes = m_aretes;

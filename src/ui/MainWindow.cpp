@@ -387,8 +387,9 @@ QWidget *MainWindow::creerPanneau()
     auto *ligneAlgo = new QHBoxLayout;
     ligneAlgo->addWidget(new QLabel("Couleurs affichées :"));
     m_algoAffiche = new QComboBox;
-    m_algoAffiche->addItem(Coloration::nom(Coloration::Algo::WelshPowell), int(Coloration::Algo::WelshPowell));
-    m_algoAffiche->addItem(Coloration::nom(Coloration::Algo::Glouton), int(Coloration::Algo::Glouton));
+    for (Coloration::Algo algo : Coloration::TOUS_LES_ALGOS)
+        m_algoAffiche->addItem(Coloration::nom(algo), int(algo));
+    m_algoAffiche->setCurrentIndex(int(Coloration::Algo::WelshPowell));  // un des deux algorithmes obligatoires
     ligneAlgo->addWidget(m_algoAffiche, 1);
     layoutColoration->addLayout(ligneAlgo);
     connect(m_algoAffiche, &QComboBox::currentIndexChanged, this, [this] {
@@ -650,12 +651,14 @@ void MainWindow::recevoirMesure(const Mesure &mesure)
                  a.valide ? "<span style='color:#15803d'>valide</span>"
                           : QString("<span style='color:#b91c1c'>%1 conflits</span>").arg(a.conflits));
     };
-    m_infosColoration->setText(ligne(Coloration::nom(Coloration::Algo::Glouton), mesure.glouton) + "<br>"
-                               + ligne(Coloration::nom(Coloration::Algo::WelshPowell), mesure.welshPowell));
+    QStringList lignes;
+    for (Coloration::Algo a : Coloration::TOUS_LES_ALGOS)
+        lignes << ligne(Coloration::nom(a), mesure.algo(a));
+    m_infosColoration->setText(lignes.join("<br>"));
 
     // Barre d'état : indicateurs de l'algorithme dont les couleurs sont affichées.
     const auto algo = static_cast<Coloration::Algo>(m_algoAffiche->currentData().toInt());
-    const MesureAlgo &affiche = (algo == Coloration::Algo::Glouton) ? mesure.glouton : mesure.welshPowell;
+    const MesureAlgo &affiche = mesure.algo(algo);
     m_indicateurs->setText(QString("%1 : %2 canaux · %3 ms · stabilité %4 · %5   ")
                                .arg(Coloration::nom(algo), fr.toString(affiche.couleurs),
                                     fr.toString(affiche.dureeMs, 'f', 2), fr.toString(affiche.stabilite, 'f', 2),

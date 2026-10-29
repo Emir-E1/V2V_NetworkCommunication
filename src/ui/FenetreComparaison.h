@@ -14,6 +14,8 @@
 
 #include <QWidget>
 
+#include <array>
+
 class QLabel;
 class QLineSeries;
 class QTableWidget;
@@ -26,6 +28,9 @@ class FenetreComparaison : public QWidget
 
 public:
     explicit FenetreComparaison(QWidget *parent = nullptr);
+
+    /// Couleur d'un algorithme, identique dans tous les graphiques.
+    static QColor couleurAlgo(Coloration::Algo algo);
 
     /// Ajoute une mesure (un recalcul) : met à jour le tableau et les courbes.
     void ajouterMesure(const Mesure &mesure);
@@ -46,18 +51,20 @@ protected:
     void showEvent(QShowEvent *event) override;
 
 private:
-    /// Une courbe par algorithme dans un graphique.
+    /// Un graphique : une courbe par algorithme.
     struct Courbes
     {
         QChart *graphique = nullptr;
-        QLineSeries *glouton = nullptr;
-        QLineSeries *welshPowell = nullptr;
+        std::array<QLineSeries *, Coloration::NOMBRE_ALGOS> series{};
         QValueAxis *axeX = nullptr;
         QValueAxis *axeY = nullptr;
         double yMax = 0.0;
+        bool yFixe = false;  ///< axe Y figé (stabilité : toujours entre 0 et 1)
     };
     Courbes creerGraphique(const QString &titre, const QString &uniteY);
-    void ajouterPoint(Courbes &courbes, double t, double yGlouton, double yWelshPowell);
+    /// Ajoute un point par algorithme ; `valeur(a)` donne la valeur de l'algorithme a.
+    template<typename Fonction>
+    void ajouterPoints(Courbes &courbes, double t, Fonction valeur);
     void majTableau();
 
     QVector<Mesure> m_mesures;

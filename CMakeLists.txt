@@ -104,3 +104,11 @@ add_test(NAME test_interference COMMAND test_interference)
 add_executable(test_coloring tests/test_coloring.cpp)
 target_link_libraries(test_coloring PRIVATE v2v-coloration)
 add_test(NAME test_coloring COMMAND test_coloring)
+
+# ---- Étude comparative (hors application) ----
+# Programme en ligne de commande qui rejoue de nombreux scénarios (nombre de véhicules,
+# portée, graines) sans interface et écrit les résultats en CSV : sert à l'étude chiffrée
+# demandée par le cahier des charges (voir docs/etude.md).
+#   build/etude_coloration data/mulhouse.osm > docs/resultats/etude.csv
+add_executable(etude_coloration outils/etude_coloration.cpp)
+target_link_libraries(etude_coloration PRIVATE v2v-simulation v2v-interference v2v-coloration)

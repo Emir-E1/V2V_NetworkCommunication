@@ -1,10 +1,10 @@
-// Fenêtre « Comparaison » : tableau récapitulatif + 3 courbes + export CSV.
+// Fenêtre « Comparaison » : tableau récapitulatif + 3 courbes + export CSV,
+// pour les 4 algorithmes de coloration.
 
 #include "ui/FenetreComparaison.h"
 
 #include <QChart>
 #include <QChartView>
-#include <QFile>
 #include <QFileDialog>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -24,35 +24,44 @@
 
 namespace
 {
-// Couleurs des deux algorithmes, identiques dans les trois graphiques.
-const QColor COULEUR_GLOUTON(0xF5, 0x82, 0x31);       // orange
-const QColor COULEUR_WELSH_POWELL(0x43, 0x63, 0xD8);  // bleu
-
 // Au-delà, on retire les plus anciens points des courbes (l'historique complet
 // reste dans m_mesures pour le tableau et l'export).
 constexpr int POINTS_MAX = 3600;
+}
+
+QColor FenetreComparaison::couleurAlgo(Coloration::Algo algo)
+{
+    switch (algo) {
+    case Coloration::Algo::Glouton:         return QColor(0xF5, 0x82, 0x31);  // orange
+    case Coloration::Algo::WelshPowell:     return QColor(0x43, 0x63, 0xD8);  // bleu
+    case Coloration::Algo::Dsatur:          return QColor(0x3C, 0xB4, 0x4B);  // vert
+    case Coloration::Algo::RechercheLocale: return QColor(0x91, 0x1E, 0xB4);  // violet
+    }
+    return Qt::gray;
 }
 
 FenetreComparaison::FenetreComparaison(QWidget *parent)
     : QWidget(parent, Qt::Window)  // fenêtre séparée, pas un morceau de la fenêtre principale
 {
     setWindowTitle("Comparaison des algorithmes de coloration");
-    resize(1200, 820);
+    resize(1250, 880);
 
     // -- Tableau : une ligne par algorithme, moyennes et maximums sur toute la simulation --
-    m_tableau = new QTableWidget(2, 6);
+    m_tableau = new QTableWidget(Coloration::NOMBRE_ALGOS, 6);
     m_tableau->setHorizontalHeaderLabels({"Canaux k (moyen)", "Canaux k (max)", "Temps moyen (ms)",
                                           "Temps max (ms)", "Stabilité moyenne", "Colorations valides"});
-    m_tableau->setVerticalHeaderLabels({Coloration::nom(Coloration::Algo::Glouton),
-                                        Coloration::nom(Coloration::Algo::WelshPowell)});
+    QStringList noms;
+    for (Coloration::Algo algo : Coloration::TOUS_LES_ALGOS)
+        noms << Coloration::nom(algo);
+    m_tableau->setVerticalHeaderLabels(noms);
     m_tableau->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_tableau->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_tableau->setSelectionMode(QAbstractItemView::NoSelection);
     m_tableau->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    // Hauteur exacte : en-tête + 2 lignes + cadre (pas de ligne vide en dessous).
+    // Hauteur exacte : en-tête + une ligne par algorithme + cadre (pas de ligne vide en dessous).
     m_tableau->setFixedHeight(m_tableau->horizontalHeader()->sizeHint().height()
-                              + 2 * m_tableau->verticalHeader()->defaultSectionSize()
-                              + 2 * m_tableau->frameWidth());
+                              + Coloration::NOMBRE_ALGOS * m_tableau->verticalHeader()->defaultSectionSize()
+                              + 2 * m_tableau->frameWidth() + 4);  // +4 : marge pour les traits de grille
 
     m_resume = new QLabel;
     m_resume->setWordWrap(true);
@@ -70,6 +79,7 @@ FenetreComparaison::FenetreComparaison(QWidget *parent)
     m_durees = creerGraphique("Temps de calcul de la coloration", "ms");
     m_stabilites = creerGraphique("Stabilité S(t) de l'allocation", "S");
     m_stabilites.axeY->setRange(0.0, 1.0);  // S est toujours entre 0 et 1
+    m_stabilites.yFixe = true;
 
     auto vue = [](QChart *graphique) {
         auto *v = new QChartView(graphique);
@@ -98,15 +108,6 @@ FenetreComparaison::Courbes FenetreComparaison::creerGraphique(const QString &ti
     c.graphique->setTitle(titre);
     c.graphique->legend()->setAlignment(Qt::AlignBottom);
 
-    c.glouton = new QLineSeries;
-    c.glouton->setName(Coloration::nom(Coloration::Algo::Glouton));
-    c.glouton->setPen(QPen(COULEUR_GLOUTON, 2));
-    c.welshPowell = new QLineSeries;
-    c.welshPowell->setName(Coloration::nom(Coloration::Algo::WelshPowell));
-    c.welshPowell->setPen(QPen(COULEUR_WELSH_POWELL, 2));
-    c.graphique->addSeries(c.glouton);
-    c.graphique->addSeries(c.welshPowell);
-
     c.axeX = new QValueAxis;
     c.axeX->setTitleText("temps simulé (s)");
     c.axeX->setLabelFormat("%.0f");
@@ -116,36 +117,44 @@ FenetreComparaison::Courbes FenetreComparaison::creerGraphique(const QString &ti
     c.axeY->setRange(0, 1);
     c.graphique->addAxis(c.axeX, Qt::AlignBottom);
     c.graphique->addAxis(c.axeY, Qt::AlignLeft);
-    for (QLineSeries *s : {c.glouton, c.welshPowell}) {
-        s->attachAxis(c.axeX);
-        s->attachAxis(c.axeY);
+
+    for (Coloration::Algo algo : Coloration::TOUS_LES_ALGOS) {
+        auto *serie = new QLineSeries;
+        serie->setName(Coloration::nom(algo));
+        serie->setPen(QPen(couleurAlgo(algo), 2));
+        c.graphique->addSeries(serie);
+        serie->attachAxis(c.axeX);
+        serie->attachAxis(c.axeY);
+        c.series[static_cast<int>(algo)] = serie;
     }
     return c;
 }
 
-void FenetreComparaison::ajouterPoint(Courbes &courbes, double t, double yGlouton, double yWelshPowell)
+template<typename Fonction>
+void FenetreComparaison::ajouterPoints(Courbes &courbes, double t, Fonction valeur)
 {
-    courbes.glouton->append(t, yGlouton);
-    courbes.welshPowell->append(t, yWelshPowell);
-    if (courbes.glouton->count() > POINTS_MAX) {
-        courbes.glouton->remove(0);
-        courbes.welshPowell->remove(0);
+    for (Coloration::Algo algo : Coloration::TOUS_LES_ALGOS) {
+        QLineSeries *serie = courbes.series[static_cast<int>(algo)];
+        const double y = valeur(algo);
+        serie->append(t, y);
+        if (serie->count() > POINTS_MAX)
+            serie->remove(0);
+        courbes.yMax = std::max(courbes.yMax, y);
     }
     // Axe X : du premier point affiché au dernier. Axe Y : de 0 au maximum vu (+10 %).
-    courbes.axeX->setRange(courbes.glouton->at(0).x(), std::max(t, courbes.glouton->at(0).x() + 1.0));
-    if (courbes.axeY != m_stabilites.axeY) {
-        courbes.yMax = std::max({courbes.yMax, yGlouton, yWelshPowell});
+    const double debut = courbes.series[0]->at(0).x();
+    courbes.axeX->setRange(debut, std::max(t, debut + 1.0));
+    if (!courbes.yFixe)
         courbes.axeY->setRange(0.0, courbes.yMax * 1.1 + 1e-9);
-    }
 }
 
 void FenetreComparaison::ajouterMesure(const Mesure &mesure)
 {
     m_mesures.append(mesure);
-    ajouterPoint(m_couleurs, mesure.temps, mesure.glouton.couleurs, mesure.welshPowell.couleurs);
-    ajouterPoint(m_durees, mesure.temps, mesure.glouton.dureeMs, mesure.welshPowell.dureeMs);
-    ajouterPoint(m_stabilites, mesure.temps, mesure.glouton.stabilite, mesure.welshPowell.stabilite);
-    // Le tableau n'est utile que si la fenêtre est ouverte : on évite de le recalculer pour rien.
+    ajouterPoints(m_couleurs, mesure.temps, [&](Coloration::Algo a) { return double(mesure.algo(a).couleurs); });
+    ajouterPoints(m_durees, mesure.temps, [&](Coloration::Algo a) { return mesure.algo(a).dureeMs; });
+    ajouterPoints(m_stabilites, mesure.temps, [&](Coloration::Algo a) { return mesure.algo(a).stabilite; });
+    // Le tableau n'est utile que si la fenêtre est ouverte (sinon : rafraîchi à l'ouverture).
     if (isVisible())
         majTableau();
 }
@@ -154,25 +163,26 @@ void FenetreComparaison::vider()
 {
     m_mesures.clear();
     for (Courbes *c : {&m_couleurs, &m_durees, &m_stabilites}) {
-        c->glouton->clear();
-        c->welshPowell->clear();
+        for (QLineSeries *serie : c->series)
+            serie->clear();
         c->yMax = 0.0;
         c->axeX->setRange(0, 10);
+        if (!c->yFixe)
+            c->axeY->setRange(0, 1);
     }
-    m_couleurs.axeY->setRange(0, 1);
-    m_durees.axeY->setRange(0, 1);
     majTableau();
 }
 
 void FenetreComparaison::majTableau()
 {
     const QLocale fr;
-    // Moyennes et maximums d'un algorithme sur toutes les mesures.
-    const auto remplir = [&](int ligne, auto champ) {
+    const int n = m_mesures.size();
+    // Moyennes et maximums de chaque algorithme sur toutes les mesures.
+    for (Coloration::Algo algo : Coloration::TOUS_LES_ALGOS) {
         double sommeK = 0, maxK = 0, sommeT = 0, maxT = 0, sommeS = 0;
         int valides = 0;
         for (const Mesure &m : m_mesures) {
-            const MesureAlgo &a = champ(m);
+            const MesureAlgo &a = m.algo(algo);
             sommeK += a.couleurs;
             maxK = std::max(maxK, double(a.couleurs));
             sommeT += a.dureeMs;
@@ -180,7 +190,6 @@ void FenetreComparaison::majTableau()
             sommeS += a.stabilite;
             valides += a.valide ? 1 : 0;
         }
-        const int n = m_mesures.size();
         const auto texte = [&](double v, int decimales) { return n ? fr.toString(v, 'f', decimales) : QString("–"); };
         const QStringList cases = {texte(n ? sommeK / n : 0, 2), texte(maxK, 0), texte(n ? sommeT / n : 0, 3),
                                    texte(maxT, 3), texte(n ? sommeS / n : 0, 3),
@@ -188,11 +197,9 @@ void FenetreComparaison::majTableau()
         for (int col = 0; col < cases.size(); ++col) {
             auto *item = new QTableWidgetItem(cases[col]);
             item->setTextAlignment(Qt::AlignCenter);
-            m_tableau->setItem(ligne, col, item);
+            m_tableau->setItem(static_cast<int>(algo), col, item);
         }
-    };
-    remplir(0, [](const Mesure &m) -> const MesureAlgo & { return m.glouton; });
-    remplir(1, [](const Mesure &m) -> const MesureAlgo & { return m.welshPowell; });
+    }
 
     if (m_mesures.isEmpty()) {
         m_resume->setText("Aucune mesure pour l'instant : lancez la simulation.");
@@ -204,7 +211,6 @@ void FenetreComparaison::majTableau()
         degre += m.interference.degreMoyen;
         duree += m.interference.dureeMs;
     }
-    const int n = m_mesures.size();
     m_resume->setText(QString("<b>%1 recalculs</b> sur %2 s simulées · %3 véhicules<br>"
                               "Graphe d'interférences : %4 arêtes et degré moyen %5 en moyenne, "
                               "construit en %6 ms (grille spatiale).")
@@ -227,19 +233,26 @@ bool FenetreComparaison::exporterCsv(const QString &chemin, QString *erreur) con
     QTextStream sortie(&fichier);
     // Format français : « ; » entre les colonnes et virgule décimale (ouverture directe
     // dans Excel / LibreOffice). En Python : pandas.read_csv(f, sep=";", decimal=",").
+    // Les espaces de séparation des milliers que QLocale ajoute sont retirés.
     const QLocale fr(QLocale::French, QLocale::France);
-    const auto nombre = [&](double v, int decimales) { return fr.toString(v, 'f', decimales).remove(QChar(0x202F)).remove(QChar(0xA0)); };
-    sortie << "temps_s;vehicules;aretes;degre_moyen;degre_max;interference_ms;"
-              "glouton_k;glouton_ms;glouton_stabilite;glouton_valide;"
-              "welsh_powell_k;welsh_powell_ms;welsh_powell_stabilite;welsh_powell_valide\n";
+    const auto nombre = [&](double v, int decimales) {
+        return fr.toString(v, 'f', decimales).remove(QChar(0x202F)).remove(QChar(0xA0));
+    };
+
+    sortie << "temps_s;vehicules;aretes;degre_moyen;degre_max;interference_ms";
+    for (Coloration::Algo algo : Coloration::TOUS_LES_ALGOS) {
+        const QString n = Coloration::nomCourt(algo);
+        sortie << ';' << n << "_k;" << n << "_ms;" << n << "_stabilite;" << n << "_valide";
+    }
+    sortie << '\n';
     for (const Mesure &m : m_mesures) {
         sortie << nombre(m.temps, 2) << ';' << m.vehicules << ';' << m.interference.aretes << ';'
                << nombre(m.interference.degreMoyen, 3) << ';' << m.interference.degreMax << ';'
-               << nombre(m.interference.dureeMs, 4) << ';'
-               << m.glouton.couleurs << ';' << nombre(m.glouton.dureeMs, 4) << ';'
-               << nombre(m.glouton.stabilite, 4) << ';' << (m.glouton.valide ? 1 : 0) << ';'
-               << m.welshPowell.couleurs << ';' << nombre(m.welshPowell.dureeMs, 4) << ';'
-               << nombre(m.welshPowell.stabilite, 4) << ';' << (m.welshPowell.valide ? 1 : 0) << '\n';
+               << nombre(m.interference.dureeMs, 4);
+        for (const MesureAlgo &a : m.algos)
+            sortie << ';' << a.couleurs << ';' << nombre(a.dureeMs, 4) << ';' << nombre(a.stabilite, 4) << ';'
+                   << (a.valide ? 1 : 0);
+        sortie << '\n';
     }
     // Les écritures sont mises en mémoire tampon : on vide le tampon et on vérifie
     // qu'il n'y a pas eu d'erreur AVANT de remplacer le fichier.

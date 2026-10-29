@@ -8,8 +8,9 @@
 /// MoteurSimulation vit donc dans un QThread à part. Environ 25 fois par seconde :
 ///   1. il fait avancer les véhicules (étape 3) ;
 ///   2. à intervalle régulier (par défaut chaque seconde simulée), il reconstruit le
-///      graphe d'interférences (étape 4) et le colore avec CHAQUE algorithme, sur le
-///      même graphe, pour une comparaison équitable (étape 5) ;
+///      graphe d'interférences (étape 4) et le colore avec CHAQUE algorithme (Glouton,
+///      Welsh–Powell, DSATUR, recherche locale), sur le même graphe, pour une
+///      comparaison équitable (étape 5) ;
 ///   3. il envoie à l'interface un Instantane (positions, couleurs, arêtes) et, après
 ///      chaque recalcul, une Mesure (nombre de couleurs, temps, stabilité...).
 ///
@@ -27,6 +28,7 @@
 #include <QPointF>
 #include <QVector>
 
+#include <array>
 #include <atomic>
 
 class QTimer;
@@ -62,8 +64,11 @@ struct Mesure
     double temps = 0.0;           ///< temps simulé (s)
     int vehicules = 0;
     StatsInterference interference;
-    MesureAlgo glouton;
-    MesureAlgo welshPowell;
+    /// Résultat de chaque algorithme, indicé par Coloration::Algo
+    /// (algos[int(Coloration::Algo::Dsatur)]...).
+    std::array<MesureAlgo, Coloration::NOMBRE_ALGOS> algos;
+
+    const MesureAlgo &algo(Coloration::Algo a) const { return algos[static_cast<int>(a)]; }
 };
 
 Q_DECLARE_METATYPE(Instantane)
@@ -124,8 +129,9 @@ private:
     double m_prochainRecalcul = 0.0;
     Coloration::Algo m_algoAffiche = Coloration::Algo::WelshPowell;
 
-    QVector<int> m_couleursGlouton;      ///< dernière coloration de chaque algorithme,
-    QVector<int> m_couleursWelshPowell;  ///< pour calculer la stabilité au recalcul suivant
+    /// Dernière coloration de chaque algorithme (indicée par Coloration::Algo) :
+    /// sert à calculer la stabilité au recalcul suivant et à colorer la carte.
+    std::array<QVector<int>, Coloration::NOMBRE_ALGOS> m_couleurs;
     QVector<QPair<int, int>> m_aretes;
     bool m_aretesAEnvoyer = false;  ///< arêtes recalculées pas encore transmises à l'interface
     double m_dureePasMs = 0.0;

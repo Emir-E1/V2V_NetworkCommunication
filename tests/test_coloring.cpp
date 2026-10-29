@@ -9,6 +9,8 @@
 #include <iomanip>
 #include <iostream>
 #include <random>
+#include <utility>
+#include <vector>
 
 // Cette vérification reste active en Release, y compris pour les performances.
 #define CHECK(condition) \
@@ -53,14 +55,43 @@ ListeAdjacence grapheAleatoire(int nombre, int degreMoyen, unsigned int graine)
     }
     return graphe;
 }
+
+ListeAdjacence grapheGeometrique(int nombre, unsigned int graine)
+{
+    std::mt19937 moteur(graine);
+    std::uniform_real_distribution<double> tirage(0.0, 8000.0);
+    std::vector<std::pair<double, double>> points(nombre);
+    for (auto &point : points) {
+        point = {tirage(moteur), tirage(moteur)};
+    }
+    ListeAdjacence graphe(nombre);
+    // Comparaison naïve de toutes les paires, indépendante de la grille du simulateur.
+    for (int i = 0; i < nombre; ++i) {
+        for (int j = i + 1; j < nombre; ++j) {
+            const double dx = points[i].first - points[j].first;
+            const double dy = points[i].second - points[j].second;
+            if (dx * dx + dy * dy < 300.0 * 300.0) {
+                ajouterArete(graphe, i, j);
+            }
+        }
+    }
+    return graphe;
+}
 }
 
 int main()
 {
     using Coloration::Algo;
-    const Algo algorithmes[] = {Algo::Glouton, Algo::WelshPowell};
+    const auto &algorithmes = Coloration::TOUS_LES_ALGOS;
+    CHECK(Coloration::NOMBRE_ALGOS == 4);
     CHECK(Coloration::nom(Algo::Glouton) == QStringLiteral("Glouton"));
     CHECK(Coloration::nom(Algo::WelshPowell) == QStringLiteral("Welsh-Powell"));
+    CHECK(Coloration::nom(Algo::Dsatur) == QStringLiteral("DSATUR"));
+    CHECK(Coloration::nom(Algo::RechercheLocale) == QStringLiteral("Recherche locale"));
+    CHECK(Coloration::nomCourt(Algo::Glouton) == QStringLiteral("glouton"));
+    CHECK(Coloration::nomCourt(Algo::WelshPowell) == QStringLiteral("welsh_powell"));
+    CHECK(Coloration::nomCourt(Algo::Dsatur) == QStringLiteral("dsatur"));
+    CHECK(Coloration::nomCourt(Algo::RechercheLocale) == QStringLiteral("recherche_locale"));
 
     ListeAdjacence complet(5);
     for (int i = 0; i < 5; ++i) {
@@ -105,19 +136,20 @@ int main()
         ListeAdjacence graphe;
         int glouton;
         int welshPowell;
+        int dsatur;
     };
     const Cas cas[] = {
-        {"vide", {}, 0, 0},
-        {"sommet isole", ListeAdjacence(1), 1, 1},
-        {"sommets isoles", ListeAdjacence(6), 1, 1},
-        {"K5", complet, 5, 5},
-        {"C6", cycle(6), 2, 2},
-        {"C7", cycle(7), 3, 3},
-        {"K3,3", biparti, 2, 2},
-        {"K1,6", etoile, 2, 2},
-        {"Petersen", petersen, -1, -1},
-        {"couronne", couronne, 4, 4},
-        {"chemin favorable a Welsh-Powell", chemin, 3, 2}
+        {"vide", {}, 0, 0, 0},
+        {"sommet isole", ListeAdjacence(1), 1, 1, 1},
+        {"sommets isoles", ListeAdjacence(6), 1, 1, 1},
+        {"K5", complet, 5, 5, 5},
+        {"C6", cycle(6), 2, 2, 2},
+        {"C7", cycle(7), 3, 3, 3},
+        {"K3,3", biparti, 2, 2, 2},
+        {"K1,6", etoile, 2, 2, 2},
+        {"Petersen", petersen, -1, -1, 3},
+        {"couronne", couronne, 4, 4, 2},
+        {"chemin favorable a Welsh-Powell", chemin, 3, 2, 2}
     };
     for (const Cas &test : cas) {
         for (Algo algo : algorithmes) {
@@ -130,7 +162,8 @@ int main()
             const int maximum = resultat.couleurs.isEmpty() ? -1
                 : *std::max_element(resultat.couleurs.cbegin(), resultat.couleurs.cend());
             CHECK(resultat.nombreCouleurs == maximum + 1);
-            const int attendu = algo == Algo::Glouton ? test.glouton : test.welshPowell;
+            const int attendu = algo == Algo::Glouton ? test.glouton
+                : algo == Algo::WelshPowell ? test.welshPowell : test.dsatur;
             if (attendu >= 0) {
                 CHECK(resultat.nombreCouleurs == attendu);
             } else {
@@ -147,6 +180,53 @@ int main()
     CHECK((Coloration::colorer(chemin, Algo::WelshPowell).couleurs == QVector<int>{1, 0, 0, 1}));
     CHECK(Coloration::colorer(chemin, Algo::WelshPowell).nombreCouleurs
           < Coloration::colorer(chemin, Algo::Glouton).nombreCouleurs);
+
+    // Les arêtes traversent uniquement les deux moitiés : deux couleurs suffisent.
+    ListeAdjacence bipartiAleatoire(500);
+    std::mt19937 moteur(31415u);
+    for (int i = 0; i < 250; ++i) {
+        for (int j = 250; j < 500; ++j) {
+            if (moteur() % 25 == 0) {
+                ajouterArete(bipartiAleatoire, i, j);
+            }
+        }
+    }
+    for (Algo algo : algorithmes) {
+        const auto resultat = Coloration::colorer(bipartiAleatoire, algo);
+        CHECK(Coloration::estValide(bipartiAleatoire, resultat.couleurs));
+        if (algo == Algo::Dsatur || algo == Algo::RechercheLocale) {
+            CHECK(resultat.nombreCouleurs == 2);
+        }
+    }
+    // Plus de 64 couleurs exerce le passage entre deux mots du bitset DSATUR.
+    ListeAdjacence grandComplet(66);
+    for (int i = 0; i < 66; ++i) {
+        for (int j = i + 1; j < 66; ++j) {
+            ajouterArete(grandComplet, i, j);
+        }
+    }
+    for (Algo algo : algorithmes) {
+        const auto resultat = Coloration::colorer(grandComplet, algo);
+        CHECK(Coloration::estValide(grandComplet, resultat.couleurs));
+        CHECK(resultat.nombreCouleurs == 66);
+    }
+    std::cout << "biparti aleatoire et K66 : OK\n";
+
+    // Une recherche qui rendrait toujours DSATUR passerait les seuls tests de
+    // validité : ces petits graphes imposent au moins une réduction effective.
+    bool amelioration = false;
+    for (unsigned int graine = 1; graine <= 20; ++graine) {
+        const auto graphe = grapheAleatoire(60, 9, graine);
+        const auto initial = Coloration::colorer(graphe, Algo::Dsatur);
+        const auto local = Coloration::colorer(graphe, Algo::RechercheLocale);
+        CHECK(Coloration::estValide(graphe, initial.couleurs));
+        CHECK(Coloration::estValide(graphe, local.couleurs));
+        CHECK(local.nombreCouleurs <= initial.nombreCouleurs);
+        CHECK(Coloration::colorer(graphe, Algo::RechercheLocale).couleurs == local.couleurs);
+        amelioration |= local.nombreCouleurs < initial.nombreCouleurs;
+    }
+    CHECK(amelioration);
+    std::cout << "reduction effective par recherche locale : OK\n";
 
     // K5 possède dix arêtes : on vérifie le comptage complet, puis un seul
     // conflit, même si chacune de ces arêtes figure deux fois dans l'adjacence.
@@ -186,39 +266,66 @@ int main()
     constexpr int nombre = 2000;
     constexpr int repetitions = 20;
     std::cout << std::fixed << std::setprecision(4);
-    for (int degreVise : {10, 30}) {
-        double totalMs[2] = {};
-        double totalCouleurs[2] = {};
+    for (int degreVise : {10, 30, 0}) {
+        double totalMs[Coloration::NOMBRE_ALGOS] = {};
+        double totalCouleurs[Coloration::NOMBRE_ALGOS] = {};
         double totalDegre = 0.0;
         for (int essai = 0; essai < repetitions; ++essai) {
-            const ListeAdjacence graphe = grapheAleatoire(
-                nombre, degreVise, 1729u + static_cast<unsigned int>(essai));
+            const unsigned int graine = 1729u + static_cast<unsigned int>(essai);
+            const ListeAdjacence graphe = degreVise == 0
+                ? grapheGeometrique(nombre, graine)
+                : grapheAleatoire(nombre, degreVise, graine);
             int degreMax = 0;
             for (const QVector<int> &voisins : graphe) {
                 degreMax = std::max(degreMax, static_cast<int>(voisins.size()));
                 totalDegre += static_cast<double>(voisins.size()) / nombre;
             }
-            for (int i = 0; i < 2; ++i) {
+            int couleursDsatur = 0;
+            for (int i = 0; i < Coloration::NOMBRE_ALGOS; ++i) {
+                if (algorithmes[i] == Algo::RechercheLocale && essai >= 5) {
+                    continue;
+                }
                 const ResultatColoration resultat = Coloration::colorer(graphe, algorithmes[i]);
                 CHECK(Coloration::estValide(graphe, resultat.couleurs));
                 CHECK(resultat.nombreCouleurs <= degreMax + 1);
                 CHECK(resultat.nombreCouleurs
                       == *std::max_element(resultat.couleurs.cbegin(), resultat.couleurs.cend()) + 1);
                 CHECK(std::isfinite(resultat.dureeMs) && resultat.dureeMs >= 0.0);
+                if (algorithmes[i] == Algo::Dsatur) {
+                    couleursDsatur = resultat.nombreCouleurs;
+                } else if (algorithmes[i] == Algo::RechercheLocale) {
+                    CHECK(resultat.nombreCouleurs <= couleursDsatur);
+                    CHECK(Coloration::colorer(graphe, Algo::RechercheLocale).couleurs
+                          == resultat.couleurs);
+                }
                 totalMs[i] += resultat.dureeMs;
                 totalCouleurs[i] += resultat.nombreCouleurs;
             }
         }
-        CHECK(std::abs(totalDegre / repetitions - degreVise) < 1.0);
-        for (int i = 0; i < 2; ++i) {
-            std::cout << Coloration::nom(algorithmes[i]).toStdString()
-                      << " : N=" << nombre << ", degre moyen=" << totalDegre / repetitions
-                      << ", k moyen=" << totalCouleurs[i] / repetitions
-                      << ", ms moyens=" << totalMs[i] / repetitions
-                      << " (" << repetitions << " essais)\n";
-            CHECK(totalMs[i] / repetitions < 5.0);
+        if (degreVise != 0) {
+            CHECK(std::abs(totalDegre / repetitions - degreVise) < 1.0);
         }
-        std::cout << "graphes aleatoires de degre " << degreVise << " : OK\n";
+        for (int i = 0; i < Coloration::NOMBRE_ALGOS; ++i) {
+            const int essais = algorithmes[i] == Algo::RechercheLocale ? 5 : repetitions;
+            std::cout << Coloration::nom(algorithmes[i]).toStdString()
+                      << " : " << (degreVise == 0 ? "geometrique, " : "aleatoire, ")
+                      << "N=" << nombre << ", degre moyen=" << totalDegre / repetitions
+                      << ", k moyen=" << totalCouleurs[i] / essais
+                      << ", ms moyens=" << totalMs[i] / essais
+                      << " (" << essais << " essais)\n";
+            if (algorithmes[i] == Algo::Glouton || algorithmes[i] == Algo::WelshPowell
+                || (algorithmes[i] == Algo::Dsatur && degreVise == 10)) {
+                CHECK(totalMs[i] / essais < 5.0);
+            }
+            if (algorithmes[i] == Algo::RechercheLocale && degreVise == 0) {
+                CHECK(totalMs[i] / essais < 30.0);
+            }
+        }
+        if (degreVise == 0) {
+            std::cout << "graphes geometriques : OK\n";
+        } else {
+            std::cout << "graphes aleatoires de degre " << degreVise << " : OK\n";
+        }
     }
 
     std::cout << "test_coloring : OK\n";

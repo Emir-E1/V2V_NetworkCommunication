@@ -8,11 +8,17 @@
 /// couleurs (canaux) possible, rapidement, car le calcul est refait régulièrement.
 /// Trouver le minimum exact est NP-difficile : on utilise des heuristiques.
 ///
-/// Algorithmes (cahier des charges : 2 obligatoires, DSATUR et recherche locale ensuite) :
+/// Algorithmes (cahier des charges : 2 obligatoires, objectif 4) :
 ///   - Glouton : on prend les sommets dans l'ordre naturel (0, 1, 2...) et on donne
 ///     à chacun la plus petite couleur non utilisée par ses voisins déjà colorés ;
 ///   - Welsh–Powell : même principe, mais les sommets sont triés par degré
-///     décroissant (les plus "contraints" d'abord), ce qui réduit souvent le nombre de couleurs.
+///     décroissant (les plus "contraints" d'abord), ce qui réduit souvent le nombre de couleurs ;
+///   - DSATUR (Brélaz, 1979) : l'ordre est choisi au fur et à mesure : on colore à chaque
+///     fois le sommet dont les voisins utilisent déjà le plus de couleurs différentes
+///     (degré de saturation), à égalité celui de plus grand degré ;
+///   - Recherche locale : part du résultat DSATUR (k couleurs) et essaie d'en enlever une,
+///     puis une autre..., par recherche tabou (TabuCol) avec un budget de calcul limité.
+///     Elle ne rend jamais une coloration invalide : au pire, celle de DSATUR.
 
 #include <QString>
 #include <QVector>
@@ -31,15 +37,30 @@ struct ResultatColoration
 
 namespace Coloration
 {
-/// Algorithmes disponibles. (DSATUR et recherche locale s'ajouteront ici.)
+/// Algorithmes disponibles (la valeur sert d'indice dans les tableaux de résultats).
 enum class Algo
 {
-    Glouton,
-    WelshPowell
+    Glouton = 0,
+    WelshPowell = 1,
+    Dsatur = 2,
+    RechercheLocale = 3
 };
 
-/// Nom affiché dans l'interface et dans l'export CSV ("Glouton", "Welsh-Powell").
+/// Nombre d'algorithmes, et leur liste dans l'ordre de l'énumération.
+constexpr int NOMBRE_ALGOS = 4;
+constexpr Algo TOUS_LES_ALGOS[NOMBRE_ALGOS] = {Algo::Glouton, Algo::WelshPowell, Algo::Dsatur, Algo::RechercheLocale};
+
+/// Nom affiché dans l'interface ("Glouton", "Welsh-Powell", "DSATUR", "Recherche locale").
 QString nom(Algo algo);
+
+/// Nom court sans espace ni accent pour les colonnes du CSV ("glouton", "welsh_powell",
+/// "dsatur", "recherche_locale").
+QString nomCourt(Algo algo);
+
+/// Budget de la recherche locale : nombre maximal de déplacements de sommets (toutes
+/// tentatives confondues). Assez petit pour rester de l'ordre de quelques millisecondes
+/// sur 2000 véhicules, car la coloration est recalculée régulièrement pendant la simulation.
+constexpr int ITERATIONS_RECHERCHE_LOCALE = 20000;
 
 /// Colore le graphe avec l'algorithme demandé. Graphe vide -> 0 couleur.
 ResultatColoration colorer(const ListeAdjacence &voisins, Algo algo);
