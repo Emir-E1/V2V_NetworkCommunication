@@ -120,6 +120,145 @@ private:
 };
 }
 
+// Les 2000 véhicules et les arêtes du graphe d'interférences, dans UN seul objet
+// graphique (décision d'équipe : un objet Qt par véhicule serait bien trop lent).
+// Redessiné ~25 fois par seconde : pas de cache image ici, mais on ne dessine que
+// ce qui est visible et on regroupe les véhicules par couleur (un appel de dessin
+// par couleur au lieu d'un par véhicule).
+class CoucheVehicules : public QGraphicsItem
+{
+public:
+    explicit CoucheVehicules(const QRectF &limites)
+        : m_limites(limites)
+    {
+        setFlag(QGraphicsItem::ItemUsesExtendedStyleOption);  // pour option->exposedRect
+    }
+
+    QRectF boundingRect() const override { return m_limites; }
+
+    void setVehicules(const QVector<QPointF> &positions, const QVector<int> &couleurs)
+    {
+        m_positions = positions;
+        m_couleurs = couleurs;
+        update();
+    }
+
+    void setAretes(const QVector<QPair<int, int>> &aretes)
+    {
+        m_aretes = aretes;
+        update();
+    }
+
+    void setAretesVisibles(bool visibles)
+    {
+        m_aretesVisibles = visibles;
+        update();
+    }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *) override
+    {
+        const QRectF visible = option->exposedRect;
+        painter->setRenderHint(QPainter::Antialiasing);
+
+        // 1. Arêtes d'interférence (si demandées) : traits fins semi-transparents entre
+        //    les positions ACTUELLES des deux véhicules. Le graphe n'est recalculé que
+        //    périodiquement, entre deux recalculs les traits suivent donc les véhicules.
+        if (m_aretesVisibles) {
+            QPen stylo(QColor(30, 41, 59, 70), 1.0);
+            stylo.setCosmetic(true);
+            painter->setPen(stylo);
+            // Sans lissage pour ces traits fins : des dizaines de milliers de lignes
+            // lissées coûtent plusieurs fois plus cher, pour une différence invisible.
+            painter->setRenderHint(QPainter::Antialiasing, false);
+
+            // Dessin par paquets de taille fixe : la mémoire utilisée reste bornée
+            // même si le graphe est énorme (portée très grande, zone très petite).
+            // Au-delà de ARETES_MAX, on arrête de dessiner : l'image serait de toute
+            // façon un aplat illisible, et le calcul (coloration) utilise toujours le graphe complet.
+            QVector<QLineF> paquet;
+            paquet.reserve(TAILLE_PAQUET);
+            int dessinees = 0;
+            for (const auto &[a, b] : m_aretes) {
+                if (a >= m_positions.size() || b >= m_positions.size())
+                    continue;  // véhicules d'une ancienne simulation
+                const QPointF pa = m_positions[a], pb = m_positions[b];
+                // Une arête peut traverser l'écran sans qu'aucun de ses bouts n'y soit :
+                // on teste donc le rectangle qui l'englobe (test large mais sûr).
+                if (std::max(pa.x(), pb.x()) < visible.left() || std::min(pa.x(), pb.x()) > visible.right()
+                    || std::max(pa.y(), pb.y()) < visible.top() || std::min(pa.y(), pb.y()) > visible.bottom())
+                    continue;
+                paquet.append(QLineF(pa, pb));
+                if (paquet.size() == TAILLE_PAQUET) {
+                    painter->drawLines(paquet);
+                    paquet.clear();
+                }
+                if (++dessinees >= ARETES_MAX)
+                    break;
+            }
+            painter->drawLines(paquet);
+            painter->setRenderHint(QPainter::Antialiasing, true);
+        }
+
+        // 2. Véhicules : chaque véhicule est une petite pastille (couleur de son canal,
+        //    contour blanc pour rester lisible sur une route foncée).
+        //    Dessiner 2000 cercles lissés coûtait ~20 ms par image (mesuré). On dessine
+        //    donc UNE fois l'image de la pastille de chaque couleur, puis on la recopie
+        //    (drawPixmap) à la position de chaque véhicule : environ 10 fois plus rapide.
+        const QTransform versEcran = painter->worldTransform();  // mètres -> pixels écran
+        const qreal dpr = painter->device()->devicePixelRatioF();
+        painter->save();
+        painter->resetTransform();  // on dessine maintenant en pixels écran
+        for (int i = 0; i < m_positions.size(); ++i) {
+            if (!visible.contains(m_positions[i]))
+                continue;
+            const int canal = i < m_couleurs.size() ? m_couleurs[i] : -1;
+            const QPixmap &image = pastille(canal, dpr);
+            const QPointF p = versEcran.map(m_positions[i]);
+            painter->drawPixmap(QPointF(p.x() - RAYON_PASTILLE, p.y() - RAYON_PASTILLE), image);
+        }
+        painter->restore();
+    }
+
+private:
+    static constexpr double RAYON_PASTILLE = 4.5;  // en pixels écran
+    static constexpr int TAILLE_PAQUET = 4096;     // arêtes dessinées par appel
+    static constexpr int ARETES_MAX = 100000;      // au-delà, on n'en dessine pas plus (~50 ms par image)
+
+    // Image de la pastille d'un canal (créée à la première demande, puis réutilisée).
+    // `dpr` : facteur d'agrandissement de l'écran (125 %, Retina...) pour une image nette.
+    const QPixmap &pastille(int canal, qreal dpr)
+    {
+        if (dpr != m_dprPastilles) {  // l'écran a changé : on recrée les images
+            m_pastilles.clear();
+            m_dprPastilles = dpr;
+        }
+        auto it = m_pastilles.find(canal);
+        if (it != m_pastilles.end())
+            return it.value();
+        const double diametre = 2 * RAYON_PASTILLE;
+        QPixmap image(qCeil(diametre * dpr), qCeil(diametre * dpr));
+        image.setDevicePixelRatio(dpr);
+        image.fill(Qt::transparent);
+        QPainter p(&image);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(Qt::NoPen);
+        p.setBrush(Qt::white);
+        p.drawEllipse(QRectF(0, 0, diametre, diametre));
+        p.setBrush(MapView::couleurCanal(canal));  // canal -1 : gris "pas encore coloré"
+        p.drawEllipse(QRectF(1.25, 1.25, diametre - 2.5, diametre - 2.5));
+        p.end();
+        return m_pastilles.insert(canal, image).value();
+    }
+
+    QHash<int, QPixmap> m_pastilles;
+    qreal m_dprPastilles = 0.0;
+    QRectF m_limites;
+    QVector<QPointF> m_positions;
+    QVector<int> m_couleurs;
+    QVector<QPair<int, int>> m_aretes;
+    bool m_aretesVisibles = false;
+};
+
 MapView::MapView(QWidget *parent)
     : QGraphicsView(parent)
 {
@@ -179,6 +318,7 @@ void MapView::afficherCarte(const OsmCarte &carte)
     m_itineraire = nullptr;
     m_marqueurs[0] = m_marqueurs[1] = nullptr;
     m_intersections = nullptr;
+    m_vehicules = nullptr;
     m_zone = QRectF();
     // Un tracé de zone commencé sur l'ancienne carte n'a plus de sens : on l'annule.
     if (m_modeSelection) {
@@ -390,6 +530,57 @@ void MapView::setIntersectionsVisibles(bool visibles)
     m_intersectionsVisibles = visibles;
     if (m_intersections)
         m_intersections->setVisible(visibles);
+}
+
+// ---------------------------------------------------------------------------
+// Étapes 3 à 5 : véhicules et graphe d'interférences
+// ---------------------------------------------------------------------------
+void MapView::afficherVehicules(const QVector<QPointF> &positions, const QVector<int> &couleurs)
+{
+    if (!m_vehicules) {
+        m_vehicules = new CoucheVehicules(sceneRect());
+        m_vehicules->setZValue(12);  // au-dessus des routes, de la zone et des intersections ; sous l'itinéraire
+        m_vehicules->setAretesVisibles(m_aretesVisibles);
+        scene()->addItem(m_vehicules);
+    }
+    m_vehicules->setVehicules(positions, couleurs);
+}
+
+void MapView::afficherAretes(const QVector<QPair<int, int>> &aretes)
+{
+    if (m_vehicules)
+        m_vehicules->setAretes(aretes);
+}
+
+void MapView::setAretesVisibles(bool visibles)
+{
+    m_aretesVisibles = visibles;
+    if (m_vehicules)
+        m_vehicules->setAretesVisibles(visibles);
+}
+
+void MapView::effacerVehicules()
+{
+    delete m_vehicules;  // retire aussi l'objet de la scène
+    m_vehicules = nullptr;
+}
+
+QColor MapView::couleurCanal(int canal)
+{
+    // 12 couleurs très différentes les unes des autres (lisibles sur fond clair),
+    // puis, au-delà, des teintes réparties avec le nombre d'or pour rester distinctes.
+    static const QColor palette[] = {
+        QColor(0xE6, 0x19, 0x4B), QColor(0x3C, 0xB4, 0x4B), QColor(0x43, 0x63, 0xD8), QColor(0xF5, 0x82, 0x31),
+        QColor(0x91, 0x1E, 0xB4), QColor(0x42, 0xD4, 0xF4), QColor(0xF0, 0x32, 0xE6), QColor(0x9A, 0x63, 0x24),
+        QColor(0x46, 0x99, 0x90), QColor(0x80, 0x00, 0x00), QColor(0x00, 0x00, 0x75), QColor(0x80, 0x80, 0x00),
+    };
+    constexpr int taille = sizeof(palette) / sizeof(palette[0]);
+    if (canal < 0)
+        return QColor(0x6B, 0x72, 0x80);
+    if (canal < taille)
+        return palette[canal];
+    const double teinte = std::fmod(canal * 0.618033988749895, 1.0);
+    return QColor::fromHsvF(teinte, 0.75, 0.85);
 }
 
 void MapView::mousePressEvent(QMouseEvent *event)

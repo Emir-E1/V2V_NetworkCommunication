@@ -1,14 +1,21 @@
-// Construction de la fenêtre principale et liaison entre la carte et le panneau.
-// Chaque étape du projet viendra ajouter ici sa partie (simulation, graphe, courbes).
+// Construction de la fenêtre principale et liaison entre la carte, le panneau,
+// la barre de contrôle du temps et le moteur de simulation (qui tourne dans son propre fil).
 
 #include "ui/MainWindow.h"
 
 #include "map/MapView.h"
 #include "map/OsmLoader.h"
+#include "ui/FenetreComparaison.h"
 
 #include <QAction>
 #include <QApplication>
+#include <QComboBox>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
+#include <QFormLayout>
+#include <QPushButton>
+#include <QSpinBox>
+#include <QThread>
 #include <QElapsedTimer>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -26,10 +33,19 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 // Dossier data/ du projet, fourni par CMake (voir CMakeLists.txt).
 #ifndef V2V_DOSSIER_DONNEES
 #define V2V_DOSSIER_DONNEES "data"
 #endif
+
+namespace
+{
+// Facteurs de vitesse du temps proposés par « Ralentir » / « Accélérer ».
+constexpr double FACTEURS_TEMPS[] = {0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0};
+constexpr int NOMBRE_FACTEURS = sizeof(FACTEURS_TEMPS) / sizeof(FACTEURS_TEMPS[0]);
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -38,6 +54,20 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle("Simulateur V2V");
     resize(1280, 800);
     setCentralWidget(m_vue);
+
+    // ---- Moteur de simulation dans son propre fil d'exécution ----
+    // Le moteur n'a pas de parent : un objet ne peut pas changer de fil s'il a un parent.
+    // Il sera détruit quand le fil s'arrête (voir le destructeur).
+    m_fil = new QThread(this);
+    m_moteur = new MoteurSimulation;
+    m_moteur->moveToThread(m_fil);
+    connect(m_fil, &QThread::finished, m_moteur, &QObject::deleteLater);
+    // Signaux du moteur : Qt les livre dans le fil de l'interface (connexion en file d'attente).
+    connect(m_moteur, &MoteurSimulation::nouvelInstantane, this, &MainWindow::recevoirInstantane);
+    connect(m_moteur, &MoteurSimulation::nouvelleMesure, this, &MainWindow::recevoirMesure);
+    m_fil->start();
+
+    m_comparaison = new FenetreComparaison(this);
 
     // ---- Actions : une action = une commande, réutilisable dans le menu ET la barre d'outils ----
     auto *actionOuvrir = new QAction("Ouvrir une carte…", this);
@@ -97,8 +127,53 @@ MainWindow::MainWindow(QWidget *parent)
     m_actionIntersections->setToolTip("Afficher les sommets du graphe routier — G");
     connect(m_actionIntersections, &QAction::toggled, m_vue, &MapView::setIntersectionsVisibles);
 
+    // Étape 4 : montrer les arêtes du graphe d'interférences sur la carte.
+    m_actionAretes = new QAction("Arêtes d'interférence", this);
+    m_actionAretes->setCheckable(true);
+    m_actionAretes->setShortcut(Qt::Key_E);
+    m_actionAretes->setToolTip("Afficher les arêtes du graphe d'interférences — E");
+    connect(m_actionAretes, &QAction::toggled, m_vue, &MapView::setAretesVisibles);
+
+    // ---- Contrôle du temps (étape 3) : barre du bas ----
+    m_actionLecture = new QAction("Démarrer", this);
+    m_actionLecture->setCheckable(true);
+    m_actionLecture->setShortcut(Qt::Key_Space);
+    m_actionLecture->setToolTip("Démarrer / mettre en pause la simulation — Espace");
+    connect(m_actionLecture, &QAction::toggled, this, [this](bool enMarche) {
+        m_actionLecture->setText(enMarche ? "Pause" : "Démarrer");
+        QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, enMarche] { moteur->setEnMarche(enMarche); },
+                                  Qt::QueuedConnection);
+        m_images = 0;
+        m_chronoImages.restart();
+        statusBar()->showMessage(enMarche ? "Simulation en marche" : "Simulation en pause");
+        if (!enMarche)
+            m_imagesParSeconde->setText("en pause");
+    });
+
+    m_actionRalentir = new QAction("Ralentir", this);
+    m_actionRalentir->setShortcut(Qt::Key_Minus);
+    m_actionRalentir->setToolTip("Diviser par 2 la vitesse du temps — touche -");
+    connect(m_actionRalentir, &QAction::triggered, this, [this] { changerFacteurTemps(-1); });
+
+    m_actionAccelerer = new QAction("Accélérer", this);
+    m_actionAccelerer->setShortcut(Qt::Key_Plus);
+    m_actionAccelerer->setToolTip("Multiplier par 2 la vitesse du temps — touche +");
+    connect(m_actionAccelerer, &QAction::triggered, this, [this] { changerFacteurTemps(+1); });
+
+    m_actionReinitialiser = new QAction("Réinitialiser", this);
+    m_actionReinitialiser->setShortcut(QKeySequence("Ctrl+R"));
+    m_actionReinitialiser->setToolTip("Recommencer la simulation au temps 0, même scénario (même graine) — Ctrl+R");
+    connect(m_actionReinitialiser, &QAction::triggered, this, [this] {
+        m_actionLecture->setChecked(false);
+        m_comparaison->vider();
+        const int generation = ++m_generation;
+        QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, generation] { moteur->reinitialiser(generation); },
+                                  Qt::QueuedConnection);
+    });
+
     // Tant qu'aucune carte n'est chargée, ces commandes n'ont pas de sens.
-    for (QAction *a : {m_actionRecentrer, m_actionZone, m_actionEffacerZone, m_actionItineraire, m_actionIntersections})
+    for (QAction *a : {m_actionRecentrer, m_actionZone, m_actionEffacerZone, m_actionItineraire, m_actionIntersections,
+                       m_actionAretes, m_actionLecture, m_actionRalentir, m_actionAccelerer, m_actionReinitialiser})
         a->setEnabled(false);
 
     // ---- Menu ----
@@ -114,6 +189,19 @@ MainWindow::MainWindow(QWidget *parent)
     menuCarte->addSeparator();
     menuCarte->addAction(m_actionItineraire);
     menuCarte->addAction(m_actionIntersections);
+    menuCarte->addAction(m_actionAretes);
+
+    auto *menuSimulation = menuBar()->addMenu("&Simulation");
+    menuSimulation->addAction(m_actionLecture);
+    menuSimulation->addAction(m_actionRalentir);
+    menuSimulation->addAction(m_actionAccelerer);
+    menuSimulation->addAction(m_actionReinitialiser);
+    menuSimulation->addSeparator();
+    menuSimulation->addAction("Comparaison des algorithmes…", this, [this] {
+        m_comparaison->show();
+        m_comparaison->raise();
+    });
+    menuSimulation->addAction("Exporter les mesures (CSV)…", this, [this] { m_comparaison->exporterAvecDialogue(this); });
 
     // ---- Barre d'outils (texte seul : plus lisible que des icônes inventées) ----
     auto *barre = addToolBar("Outils");
@@ -127,6 +215,9 @@ MainWindow::MainWindow(QWidget *parent)
     barre->addSeparator();
     barre->addAction(m_actionItineraire);
     barre->addAction(m_actionIntersections);
+    barre->addAction(m_actionAretes);
+
+    creerBarreTemps();
 
     // ---- Panneau de contrôle à droite, figé (ni fermable ni détachable) ----
     auto *dock = new QDockWidget("Contrôles", this);
@@ -146,7 +237,10 @@ MainWindow::MainWindow(QWidget *parent)
     dock->setFeatures(QDockWidget::NoDockWidgetFeatures);
     addDockWidget(Qt::RightDockWidgetArea, dock);
 
-    // ---- Barre d'état : message à gauche, coordonnées GPS à droite ----
+    // ---- Barre d'état : message à gauche ; indicateurs de la coloration et
+    //      coordonnées GPS à droite (cahier des charges §5) ----
+    m_indicateurs = new QLabel;
+    statusBar()->addPermanentWidget(m_indicateurs);
     m_coordonnees = new QLabel;
     m_coordonnees->setMinimumWidth(200);
     statusBar()->addPermanentWidget(m_coordonnees);
@@ -225,6 +319,105 @@ QWidget *MainWindow::creerPanneau()
     layoutItineraire->addWidget(boutonItineraire);
     layout->addWidget(groupeItineraire);
 
+    // -- Simulation (étape 3) : réglages. La portée et l'intervalle de recalcul
+    //    s'appliquent tout de suite ; le nombre de véhicules et la graine
+    //    demandent de relancer (bouton « Appliquer »). --
+    auto *groupeSimulation = new QGroupBox("Simulation");
+    auto *layoutSimulation = new QVBoxLayout(groupeSimulation);
+    auto *formulaire = new QFormLayout;
+    m_nombreVehicules = new QSpinBox;
+    m_nombreVehicules->setRange(10, 10000);
+    m_nombreVehicules->setSingleStep(100);
+    m_nombreVehicules->setValue(2000);  // au moins 2000 exigés par le sujet
+    m_nombreVehicules->setGroupSeparatorShown(true);
+    formulaire->addRow("Véhicules", m_nombreVehicules);
+    m_rayon = new QDoubleSpinBox;
+    m_rayon->setRange(20, 2000);
+    m_rayon->setSingleStep(25);
+    m_rayon->setDecimals(0);
+    m_rayon->setSuffix(" m");
+    m_rayon->setValue(300);
+    m_rayon->setToolTip("Portée radio R commune à tous les véhicules");
+    formulaire->addRow("Portée R", m_rayon);
+    m_intervalle = new QDoubleSpinBox;
+    m_intervalle->setRange(0.2, 30);
+    m_intervalle->setSingleStep(0.2);
+    m_intervalle->setDecimals(1);
+    m_intervalle->setSuffix(" s");
+    m_intervalle->setValue(1.0);
+    m_intervalle->setToolTip("Temps simulé entre deux recalculs du graphe d'interférences et de la coloration");
+    formulaire->addRow("Recalcul toutes les", m_intervalle);
+    m_graine = new QSpinBox;
+    m_graine->setRange(0, 999999);
+    m_graine->setValue(42);
+    m_graine->setToolTip("Même graine = même scénario : utile pour comparer les algorithmes");
+    formulaire->addRow("Graine aléatoire", m_graine);
+    layoutSimulation->addLayout(formulaire);
+    auto *boutonAppliquer = new QPushButton("Appliquer et relancer");
+    connect(boutonAppliquer, &QPushButton::clicked, this, &MainWindow::lancerSimulation);
+    layoutSimulation->addWidget(boutonAppliquer);
+    m_infosSimulation = new QLabel("Chargez une carte pour lancer la simulation.");
+    m_infosSimulation->setWordWrap(true);
+    layoutSimulation->addWidget(m_infosSimulation);
+    layout->addWidget(groupeSimulation);
+
+    connect(m_rayon, &QDoubleSpinBox::valueChanged, this, [this](double rayon) {
+        QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, rayon] { moteur->setRayon(rayon); }, Qt::QueuedConnection);
+    });
+    connect(m_intervalle, &QDoubleSpinBox::valueChanged, this, [this](double secondes) {
+        QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, secondes] { moteur->setIntervalleRecalcul(secondes); },
+                                  Qt::QueuedConnection);
+    });
+
+    // -- Graphe d'interférences (étape 4) : statistiques demandées par le cahier --
+    auto *groupeInterference = new QGroupBox("Graphe d'interférences");
+    auto *layoutInterference = new QVBoxLayout(groupeInterference);
+    m_infosInterference = new QLabel("Pas encore calculé.");
+    m_infosInterference->setWordWrap(true);
+    layoutInterference->addWidget(m_infosInterference);
+    auto *boutonAretes = new QToolButton;
+    boutonAretes->setDefaultAction(m_actionAretes);
+    boutonAretes->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    layoutInterference->addWidget(boutonAretes);
+    layout->addWidget(groupeInterference);
+
+    // -- Coloration (étape 5) : algorithme affiché, résultats des deux algorithmes --
+    auto *groupeColoration = new QGroupBox("Coloration (canaux radio)");
+    auto *layoutColoration = new QVBoxLayout(groupeColoration);
+    auto *ligneAlgo = new QHBoxLayout;
+    ligneAlgo->addWidget(new QLabel("Couleurs affichées :"));
+    m_algoAffiche = new QComboBox;
+    m_algoAffiche->addItem(Coloration::nom(Coloration::Algo::WelshPowell), int(Coloration::Algo::WelshPowell));
+    m_algoAffiche->addItem(Coloration::nom(Coloration::Algo::Glouton), int(Coloration::Algo::Glouton));
+    ligneAlgo->addWidget(m_algoAffiche, 1);
+    layoutColoration->addLayout(ligneAlgo);
+    connect(m_algoAffiche, &QComboBox::currentIndexChanged, this, [this] {
+        const auto algo = static_cast<Coloration::Algo>(m_algoAffiche->currentData().toInt());
+        QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, algo] { moteur->setAlgoAffiche(algo); },
+                                  Qt::QueuedConnection);
+        if (!m_comparaison->mesures().isEmpty())
+            recevoirMesure(m_comparaison->mesures().last());  // met à jour indicateurs et légende
+    });
+    m_infosColoration = new QLabel("Pas encore calculée.");
+    m_infosColoration->setWordWrap(true);
+    layoutColoration->addWidget(m_infosColoration);
+    m_legendeCanaux = new QLabel;
+    layoutColoration->addWidget(m_legendeCanaux);
+    auto *boutonsColoration = new QHBoxLayout;
+    auto *boutonComparaison = new QPushButton("Comparaison…");
+    boutonComparaison->setToolTip("Tableau et courbes : nombre de canaux, temps de calcul, stabilité");
+    connect(boutonComparaison, &QPushButton::clicked, this, [this] {
+        m_comparaison->show();
+        m_comparaison->raise();
+        m_comparaison->activateWindow();
+    });
+    auto *boutonCsv = new QPushButton("Exporter CSV…");
+    connect(boutonCsv, &QPushButton::clicked, this, [this] { m_comparaison->exporterAvecDialogue(this); });
+    boutonsColoration->addWidget(boutonComparaison);
+    boutonsColoration->addWidget(boutonCsv);
+    layoutColoration->addLayout(boutonsColoration);
+    layout->addWidget(groupeColoration);
+
     // -- Légende : un petit trait de la couleur et de l'épaisseur de chaque type de route --
     auto *groupeLegende = new QGroupBox("Légende");
     auto *layoutLegende = new QVBoxLayout(groupeLegende);
@@ -293,11 +486,204 @@ bool MainWindow::chargerCarte(const QString &chemin)
     setWindowTitle(QString("Simulateur V2V — %1").arg(QFileInfo(chemin).fileName()));
     statusBar()->showMessage(QString("Carte chargée en %1 ms").arg(ms));
 
-    for (QAction *a : {m_actionRecentrer, m_actionZone, m_actionEffacerZone, m_actionItineraire, m_actionIntersections})
+    for (QAction *a : {m_actionRecentrer, m_actionZone, m_actionEffacerZone, m_actionItineraire, m_actionIntersections,
+                       m_actionAretes, m_actionRalentir, m_actionAccelerer, m_actionReinitialiser})
         a->setEnabled(true);
+    changerFacteurTemps(0);  // désactive Ralentir/Accélérer si on est déjà au minimum/maximum
     majInfosZone();
-    construireGraphe();
+    construireGraphe();  // relance aussi la simulation sur le nouveau graphe
     return true;
+}
+
+MainWindow::~MainWindow()
+{
+    // Arrête la boucle d'événements du fil puis attend qu'il ait fini :
+    // le moteur (et son minuteur) sont détruits proprement avant la fenêtre.
+    m_fil->quit();
+    m_fil->wait();
+}
+
+void MainWindow::creerBarreTemps()
+{
+    // Barre du bas, comme sur la maquette du cahier des charges : contrôle du temps.
+    auto *barre = new QToolBar("Contrôle du temps", this);
+    barre->setMovable(false);
+    barre->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    addToolBar(Qt::BottomToolBarArea, barre);
+
+    barre->addAction(m_actionLecture);
+    barre->addSeparator();
+    barre->addAction(m_actionRalentir);
+    m_facteurTemps = new QLabel;
+    m_facteurTemps->setMinimumWidth(48);
+    m_facteurTemps->setAlignment(Qt::AlignCenter);
+    m_facteurTemps->setToolTip("Vitesse du temps simulé par rapport au temps réel");
+    barre->addWidget(m_facteurTemps);
+    barre->addAction(m_actionAccelerer);
+    barre->addSeparator();
+    barre->addAction(m_actionReinitialiser);
+    barre->addSeparator();
+    m_tempsSimule = new QLabel;
+    barre->addWidget(m_tempsSimule);
+
+    // Ressort : pousse le compteur d'images par seconde tout à droite.
+    auto *ressort = new QWidget;
+    ressort->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    barre->addWidget(ressort);
+    m_imagesParSeconde = new QLabel;
+    m_imagesParSeconde->setToolTip("Images affichées par seconde (objectif : 25)");
+    barre->addWidget(m_imagesParSeconde);
+
+    changerFacteurTemps(0);  // affiche « ×1 »
+    m_tempsSimule->setText("Temps simulé : 00:00:00");
+}
+
+void MainWindow::changerFacteurTemps(int delta)
+{
+    m_indiceFacteur = std::clamp(m_indiceFacteur + delta, 0, NOMBRE_FACTEURS - 1);
+    const double facteur = FACTEURS_TEMPS[m_indiceFacteur];
+    m_facteurTemps->setText(QString("×%1").arg(QLocale().toString(facteur)));
+    m_actionRalentir->setEnabled(m_indiceFacteur > 0 && !m_carte.routes.isEmpty());
+    m_actionAccelerer->setEnabled(m_indiceFacteur < NOMBRE_FACTEURS - 1 && !m_carte.routes.isEmpty());
+    QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, facteur] { moteur->setFacteurTemps(facteur); },
+                              Qt::QueuedConnection);
+}
+
+void MainWindow::lancerSimulation()
+{
+    m_actionLecture->setChecked(false);  // une nouvelle simulation démarre en pause
+    m_comparaison->vider();
+    const int generation = ++m_generation;  // tout message de l'ancienne simulation sera ignoré
+    m_infosInterference->setText("Pas encore calculé.");
+    m_infosColoration->setText("Pas encore calculée.");
+    m_indicateurs->clear();
+    majLegendeCanaux(0);
+
+    const bool grapheVide = m_graphe.sommets().size() < 2;
+    m_actionLecture->setEnabled(!grapheVide);
+    m_actionReinitialiser->setEnabled(!grapheVide);
+    if (grapheVide) {
+        m_vue->effacerVehicules();
+        m_infosSimulation->setText("Pas de simulation : le graphe routier est vide.");
+        // On envoie quand même le graphe vide au moteur : il oublie l'ancienne
+        // simulation (sinon « Réinitialiser » la ferait réapparaître).
+    }
+
+    ParametresSimulation parametres;
+    parametres.nombreVehicules = m_nombreVehicules->value();
+    parametres.rayon = m_rayon->value();
+    parametres.graine = static_cast<unsigned>(m_graine->value());
+    const double intervalle = m_intervalle->value();
+    // Le graphe est copié dans la lambda : le moteur travaille sur sa propre copie,
+    // l'interface peut reconstruire le sien sans risque d'accès simultané.
+    QMetaObject::invokeMethod(
+        m_moteur, [moteur = m_moteur, graphe = m_graphe, parametres, intervalle, generation] {
+            moteur->demarrer(graphe, parametres, intervalle, generation);
+        },
+        Qt::QueuedConnection);
+    if (!grapheVide)
+        statusBar()->showMessage("Simulation prête : appuyez sur « Démarrer » (Espace)");
+}
+
+void MainWindow::recevoirInstantane(const Instantane &instantane)
+{
+    // Image d'une simulation déjà remplacée (encore en route au moment du redémarrage) : ignorée.
+    if (instantane.generation != m_generation) {
+        m_moteur->instantaneAffiche();
+        return;
+    }
+    if (instantane.positions.isEmpty()) {
+        m_vue->effacerVehicules();
+    } else {
+        m_vue->afficherVehicules(instantane.positions, instantane.couleurs);
+        if (instantane.nouvellesAretes)
+            m_vue->afficherAretes(instantane.aretes);
+    }
+
+    const int secondes = static_cast<int>(instantane.temps);
+    m_tempsSimule->setText(QString("Temps simulé : %1:%2:%3")
+                               .arg(secondes / 3600, 2, 10, QChar('0'))
+                               .arg(secondes / 60 % 60, 2, 10, QChar('0'))
+                               .arg(secondes % 60, 2, 10, QChar('0')));
+    const QLocale fr;
+    m_infosSimulation->setText(QString("<b>%1 véhicules</b> · %2<br>Vitesse moyenne %3 km/h · %4 arrivées<br>"
+                                       "Calcul d'un pas : %5 ms")
+                                   .arg(fr.toString(instantane.positions.size()),
+                                        m_actionLecture->isChecked() ? "en marche" : "en pause",
+                                        fr.toString(instantane.vitesseMoyenne * 3.6, 'f', 0),
+                                        fr.toString(instantane.arrivees),
+                                        fr.toString(instantane.dureePasMs, 'f', 2)));
+
+    // Images par seconde réellement affichées (objectif du cahier : 25).
+    if (m_actionLecture->isChecked()) {
+        ++m_images;
+        if (m_chronoImages.elapsed() >= 1000) {
+            m_imagesParSeconde->setText(QString("%1 images/s").arg(fr.toString(m_images * 1000.0 / m_chronoImages.elapsed(), 'f', 0)));
+            m_images = 0;
+            m_chronoImages.restart();
+        }
+    }
+    m_moteur->instantaneAffiche();  // le moteur peut envoyer l'image suivante
+}
+
+void MainWindow::recevoirMesure(const Mesure &mesure)
+{
+    if (mesure.generation != m_generation)
+        return;  // mesure d'une simulation déjà remplacée
+
+    // recevoirMesure est aussi rappelée avec la dernière mesure quand on change
+    // d'algorithme affiché : on n'ajoute à l'historique que les nouvelles mesures.
+    if (m_comparaison->mesures().isEmpty() || &mesure != &m_comparaison->mesures().last())
+        m_comparaison->ajouterMesure(mesure);
+
+    const QLocale fr;
+    const StatsInterference &s = mesure.interference;
+    m_infosInterference->setText(QString("<b>%1 arêtes</b> entre %2 véhicules<br>Degré moyen %3 · maximal %4<br>"
+                                         "Construit en %5 ms (grille spatiale)")
+                                     .arg(fr.toString(s.aretes), fr.toString(s.sommets),
+                                          fr.toString(s.degreMoyen, 'f', 2), fr.toString(s.degreMax),
+                                          fr.toString(s.dureeMs, 'f', 2)));
+
+    const auto ligne = [&](const QString &nom, const MesureAlgo &a) {
+        return QString("<b>%1</b> : %2 canaux · %3 ms · S = %4 · %5")
+            .arg(nom, fr.toString(a.couleurs), fr.toString(a.dureeMs, 'f', 2), fr.toString(a.stabilite, 'f', 2),
+                 a.valide ? "<span style='color:#15803d'>valide</span>"
+                          : QString("<span style='color:#b91c1c'>%1 conflits</span>").arg(a.conflits));
+    };
+    m_infosColoration->setText(ligne(Coloration::nom(Coloration::Algo::Glouton), mesure.glouton) + "<br>"
+                               + ligne(Coloration::nom(Coloration::Algo::WelshPowell), mesure.welshPowell));
+
+    // Barre d'état : indicateurs de l'algorithme dont les couleurs sont affichées.
+    const auto algo = static_cast<Coloration::Algo>(m_algoAffiche->currentData().toInt());
+    const MesureAlgo &affiche = (algo == Coloration::Algo::Glouton) ? mesure.glouton : mesure.welshPowell;
+    m_indicateurs->setText(QString("%1 : %2 canaux · %3 ms · stabilité %4 · %5   ")
+                               .arg(Coloration::nom(algo), fr.toString(affiche.couleurs),
+                                    fr.toString(affiche.dureeMs, 'f', 2), fr.toString(affiche.stabilite, 'f', 2),
+                                    affiche.valide ? "valide" : "CONFLITS"));
+    majLegendeCanaux(affiche.couleurs);
+}
+
+void MainWindow::majLegendeCanaux(int nombre)
+{
+    if (nombre <= 0) {
+        m_legendeCanaux->clear();
+        return;
+    }
+    // Une pastille par canal utilisé, dans la couleur des véhicules sur la carte.
+    constexpr int maxAffiches = 16, taille = 14;
+    const int affiches = std::min(nombre, maxAffiches);
+    QPixmap image(affiches * (taille + 3), taille);
+    image.fill(Qt::transparent);
+    QPainter p(&image);
+    p.setRenderHint(QPainter::Antialiasing);
+    for (int c = 0; c < affiches; ++c) {
+        p.setPen(QPen(Qt::white, 1.5));
+        p.setBrush(MapView::couleurCanal(c));
+        p.drawEllipse(QRectF(c * (taille + 3) + 1, 1, taille - 2, taille - 2));
+    }
+    p.end();
+    m_legendeCanaux->setPixmap(image);
+    m_legendeCanaux->setToolTip(QString("%1 canaux radio utilisés%2").arg(nombre).arg(nombre > maxAffiches ? " (16 premiers affichés)" : ""));
 }
 
 void MainWindow::construireGraphe()
@@ -323,9 +709,11 @@ void MainWindow::construireGraphe()
         m_infosGraphe->setText("Aucune route utilisable dans cette zone : agrandissez-la.");
         m_actionItineraire->setChecked(false);  // quitte proprement le mode (désactiver ne décoche pas)
         m_actionItineraire->setEnabled(false);
+        lancerSimulation();  // arrête et efface la simulation précédente
         return;
     }
     m_actionItineraire->setEnabled(true);
+    lancerSimulation();  // nouveau graphe = nouvelle simulation (les véhicules roulent sur ce graphe)
 
     const QLocale fr;
     m_infosGraphe->setText(QString("<b>%1 intersections · %2 tronçons</b><br>Construit en %3 ms. "

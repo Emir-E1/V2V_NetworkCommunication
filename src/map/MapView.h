@@ -64,6 +64,19 @@ public:
     // Couleur de l'itinéraire, partagée avec le panneau.
     static QColor couleurItineraire() { return QColor(0x7C, 0x3A, 0xED); }
 
+    // ---- Étapes 3 à 5 : véhicules et graphe d'interférences ----
+
+    // Positions des véhicules (mètres) et canal radio de chacun (-1 = pas encore coloré).
+    // Appelé ~25 fois par seconde pendant la simulation.
+    void afficherVehicules(const QVector<QPointF> &positions, const QVector<int> &couleurs);
+    // Arêtes d'interférence (paires d'indices de véhicules), dessinées entre leurs positions actuelles.
+    void afficherAretes(const QVector<QPair<int, int>> &aretes);
+    void setAretesVisibles(bool visibles);
+    // Retire tous les véhicules (nouvelle carte, zone vide...).
+    void effacerVehicules();
+    // Couleur d'un canal radio : palette de couleurs bien distinctes, partagée avec la légende.
+    static QColor couleurCanal(int canal);
+
 signals:
     // Simple clic sur la carte en mode itinéraire (position en mètres).
     void clicCarte(const QPointF &pos);
@@ -108,4 +121,8 @@ private:
     QGraphicsItem *m_marqueurs[2] = {nullptr, nullptr};  // pastilles A et B
     QGraphicsItem *m_intersections = nullptr;
     bool m_intersectionsVisibles = false;
+
+    // Véhicules et arêtes : un seul objet graphique (voir CoucheVehicules dans MapView.cpp).
+    class CoucheVehicules *m_vehicules = nullptr;
+    bool m_aretesVisibles = false;
 };
