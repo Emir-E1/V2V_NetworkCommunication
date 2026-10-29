@@ -28,6 +28,9 @@ add_library(v2v-core STATIC
     src/map/OsmData.h
     src/map/OsmLoader.h
     src/map/OsmLoader.cpp
+    # Étape 2 : graphe routier orienté et plus court chemin
+    src/roadgraph/RoadGraph.h
+    src/roadgraph/RoadGraph.cpp
 )
 # PUBLIC : tout ce qui utilise v2v-core peut écrire #include "map/OsmData.h".
 target_include_directories(v2v-core PUBLIC src)
@@ -57,3 +60,9 @@ enable_testing()
 add_executable(test_osm_loader tests/test_osm_loader.cpp)
 target_link_libraries(test_osm_loader PRIVATE v2v-core)
 add_test(NAME test_osm_loader COMMAND test_osm_loader)
+
+# Vérifie le graphe routier (sens uniques, longueurs, composante connexe) et que
+# Dijkstra et A* trouvent bien le même plus court chemin.
+add_executable(test_road_graph tests/test_road_graph.cpp)
+target_link_libraries(test_road_graph PRIVATE v2v-core)
+add_test(NAME test_road_graph COMMAND test_road_graph)

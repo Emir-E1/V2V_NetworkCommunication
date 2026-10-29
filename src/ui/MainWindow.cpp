@@ -19,6 +19,8 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPainter>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QStatusBar>
 #include <QToolBar>
 #include <QToolButton>
@@ -54,6 +56,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_actionZone->setToolTip("Tracer à la souris la zone de simulation (Échap pour annuler) — Z");
     connect(m_actionZone, &QAction::toggled, m_vue, &MapView::setModeSelectionZone);
     connect(m_actionZone, &QAction::toggled, this, [this](bool actif) {
+        if (actif && m_actionItineraire)
+            m_actionItineraire->setChecked(false);  // un seul mode "clic sur la carte" à la fois
         if (actif)
             statusBar()->showMessage("Cliquez-glissez sur la carte pour tracer la zone de simulation (Échap pour annuler)");
     });
@@ -64,10 +68,37 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_actionEffacerZone, &QAction::triggered, this, [this] {
         m_vue->effacerZone();
         majInfosZone();
+        construireGraphe();  // le graphe couvre de nouveau toute la carte
     });
 
+    // Étape 2 : tester le plus court chemin en cliquant un départ puis une arrivée.
+    m_actionItineraire = new QAction("Itinéraire", this);
+    m_actionItineraire->setCheckable(true);
+    m_actionItineraire->setShortcut(Qt::Key_I);
+    m_actionItineraire->setToolTip("Cliquer un départ puis une arrivée pour voir le plus court chemin — I");
+    connect(m_actionItineraire, &QAction::toggled, this, [this](bool actif) {
+        if (actif)
+            m_actionZone->setChecked(false);  // un seul mode "clic sur la carte" à la fois
+        m_vue->setModeItineraire(actif);
+        m_depart = -1;
+        if (actif) {
+            statusBar()->showMessage("Itinéraire : cliquez le point de départ sur la carte");
+            m_infosItineraire->setText("Cliquez le départ (A) sur la carte.");
+        } else {
+            m_vue->effacerItineraire();
+            m_infosItineraire->setText("Activez « Itinéraire » puis cliquez deux points.");
+        }
+    });
+
+    // Étape 2 : montrer les sommets du graphe (intersections et extrémités de routes).
+    m_actionIntersections = new QAction("Intersections", this);
+    m_actionIntersections->setCheckable(true);
+    m_actionIntersections->setShortcut(Qt::Key_G);
+    m_actionIntersections->setToolTip("Afficher les sommets du graphe routier — G");
+    connect(m_actionIntersections, &QAction::toggled, m_vue, &MapView::setIntersectionsVisibles);
+
     // Tant qu'aucune carte n'est chargée, ces commandes n'ont pas de sens.
-    for (QAction *a : {m_actionRecentrer, m_actionZone, m_actionEffacerZone})
+    for (QAction *a : {m_actionRecentrer, m_actionZone, m_actionEffacerZone, m_actionItineraire, m_actionIntersections})
         a->setEnabled(false);
 
     // ---- Menu ----
@@ -80,6 +111,9 @@ MainWindow::MainWindow(QWidget *parent)
     menuCarte->addAction(m_actionRecentrer);
     menuCarte->addAction(m_actionZone);
     menuCarte->addAction(m_actionEffacerZone);
+    menuCarte->addSeparator();
+    menuCarte->addAction(m_actionItineraire);
+    menuCarte->addAction(m_actionIntersections);
 
     // ---- Barre d'outils (texte seul : plus lisible que des icônes inventées) ----
     auto *barre = addToolBar("Outils");
@@ -90,10 +124,25 @@ MainWindow::MainWindow(QWidget *parent)
     barre->addAction(m_actionRecentrer);
     barre->addAction(m_actionZone);
     barre->addAction(m_actionEffacerZone);
+    barre->addSeparator();
+    barre->addAction(m_actionItineraire);
+    barre->addAction(m_actionIntersections);
 
     // ---- Panneau de contrôle à droite, figé (ni fermable ni détachable) ----
     auto *dock = new QDockWidget("Contrôles", this);
-    dock->setWidget(creerPanneau());
+    // Zone défilante : sur un petit écran (portable), le panneau reste utilisable.
+    auto *defilement = new QScrollArea;
+    QWidget *panneau = creerPanneau();
+    defilement->setWidget(panneau);
+    defilement->setWidgetResizable(true);
+    defilement->setFrameShape(QFrame::NoFrame);
+    defilement->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // Largeur = celle dont le panneau a besoin + la barre de défilement verticale :
+    // sinon le texte et les boutons sont coupés à droite.
+    // (qMax : la largeur minimale imposée au panneau compte plus que celle estimée par Qt.)
+    defilement->setMinimumWidth(qMax(panneau->minimumWidth(), panneau->minimumSizeHint().width())
+                                + defilement->verticalScrollBar()->sizeHint().width());
+    dock->setWidget(defilement);
     dock->setFeatures(QDockWidget::NoDockWidgetFeatures);
     addDockWidget(Qt::RightDockWidgetArea, dock);
 
@@ -109,7 +158,11 @@ MainWindow::MainWindow(QWidget *parent)
                                    .arg(QLocale().toString(lat, 'f', 5))
                                    .arg(QLocale().toString(lon, 'f', 5)));
     });
-    connect(m_vue, &MapView::zoneChoisie, this, [this] { majInfosZone(); });
+    connect(m_vue, &MapView::zoneChoisie, this, [this] {
+        majInfosZone();
+        construireGraphe();  // le graphe se limite à la nouvelle zone
+    });
+    connect(m_vue, &MapView::clicCarte, this, &MainWindow::clicItineraire);
     // Le tracé est fini (ou annulé) : on relâche le bouton "Choisir la zone".
     connect(m_vue, &MapView::modeSelectionTermine, this, [this] {
         m_actionZone->setChecked(false);
@@ -147,6 +200,30 @@ QWidget *MainWindow::creerPanneau()
     }
     layoutZone->addLayout(boutons);
     layout->addWidget(groupeZone);
+
+    // -- Graphe routier (étape 2) : taille du graphe et affichage des intersections --
+    auto *groupeGraphe = new QGroupBox("Graphe routier");
+    auto *layoutGraphe = new QVBoxLayout(groupeGraphe);
+    m_infosGraphe = new QLabel("Chargez une carte pour construire le graphe.");
+    m_infosGraphe->setWordWrap(true);
+    layoutGraphe->addWidget(m_infosGraphe);
+    auto *boutonIntersections = new QToolButton;
+    boutonIntersections->setDefaultAction(m_actionIntersections);
+    boutonIntersections->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    layoutGraphe->addWidget(boutonIntersections);
+    layout->addWidget(groupeGraphe);
+
+    // -- Itinéraire de test : vérifie visuellement le plus court chemin (Dijkstra / A*) --
+    auto *groupeItineraire = new QGroupBox("Plus court chemin");
+    auto *layoutItineraire = new QVBoxLayout(groupeItineraire);
+    m_infosItineraire = new QLabel("Activez « Itinéraire » puis cliquez deux points.");
+    m_infosItineraire->setWordWrap(true);
+    layoutItineraire->addWidget(m_infosItineraire);
+    auto *boutonItineraire = new QToolButton;
+    boutonItineraire->setDefaultAction(m_actionItineraire);
+    boutonItineraire->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    layoutItineraire->addWidget(boutonItineraire);
+    layout->addWidget(groupeItineraire);
 
     // -- Légende : un petit trait de la couleur et de l'épaisseur de chaque type de route --
     auto *groupeLegende = new QGroupBox("Légende");
@@ -216,10 +293,104 @@ bool MainWindow::chargerCarte(const QString &chemin)
     setWindowTitle(QString("Simulateur V2V — %1").arg(QFileInfo(chemin).fileName()));
     statusBar()->showMessage(QString("Carte chargée en %1 ms").arg(ms));
 
-    for (QAction *a : {m_actionRecentrer, m_actionZone, m_actionEffacerZone})
+    for (QAction *a : {m_actionRecentrer, m_actionZone, m_actionEffacerZone, m_actionItineraire, m_actionIntersections})
         a->setEnabled(true);
     majInfosZone();
+    construireGraphe();
     return true;
+}
+
+void MainWindow::construireGraphe()
+{
+    QElapsedTimer chrono;
+    chrono.start();
+    const bool ok = m_graphe.construire(m_carte, m_vue->zone());
+    const qint64 ms = chrono.elapsed();
+
+    // Les indices de sommets changent à chaque construction : l'ancien itinéraire n'a plus de sens.
+    m_depart = -1;
+    m_vue->effacerItineraire();
+    if (m_actionItineraire->isChecked())
+        m_infosItineraire->setText("Cliquez le départ (A) sur la carte.");
+
+    QVector<QPointF> positions;
+    positions.reserve(m_graphe.sommets().size());
+    for (const Sommet &s : m_graphe.sommets())
+        positions.append(s.pos);
+    m_vue->afficherIntersections(positions);
+
+    if (!ok) {
+        m_infosGraphe->setText("Aucune route utilisable dans cette zone : agrandissez-la.");
+        m_actionItineraire->setChecked(false);  // quitte proprement le mode (désactiver ne décoche pas)
+        m_actionItineraire->setEnabled(false);
+        return;
+    }
+    m_actionItineraire->setEnabled(true);
+
+    const QLocale fr;
+    m_infosGraphe->setText(QString("<b>%1 intersections · %2 tronçons</b><br>Construit en %3 ms. "
+                                   "Toutes les intersections gardées sont reliées entre elles.")
+                               .arg(fr.toString(m_graphe.sommets().size()),
+                                    fr.toString(m_graphe.troncons().size()),
+                                    fr.toString(ms)));
+}
+
+void MainWindow::clicItineraire(const QPointF &pos)
+{
+    const int sommet = m_graphe.sommetLePlusProche(pos);
+    if (sommet < 0)
+        return;
+    const QPointF posSommet = m_graphe.sommets()[sommet].pos;
+
+    // Premier clic (ou nouveau départ après un itinéraire affiché) : on fixe le départ A.
+    if (m_depart < 0) {
+        m_depart = sommet;
+        m_vue->effacerItineraire();
+        m_vue->afficherMarqueur(0, posSommet);
+        m_infosItineraire->setText("Départ choisi. Cliquez l'arrivée (B).");
+        statusBar()->showMessage("Itinéraire : cliquez le point d'arrivée");
+        return;
+    }
+
+    // Second clic : arrivée B. On lance les deux algorithmes pour les comparer ;
+    // ils doivent trouver la même longueur, A* en visitant moins de sommets.
+    StatsChemin statsAStar, statsDijkstra;
+    const QVector<int> chemin = m_graphe.plusCourtChemin(m_depart, sommet, GrapheRoutier::Algo::AStar, &statsAStar);
+    m_graphe.plusCourtChemin(m_depart, sommet, GrapheRoutier::Algo::Dijkstra, &statsDijkstra);
+    m_vue->afficherMarqueur(1, posSommet);
+    m_depart = -1;  // le prochain clic choisira un nouveau départ
+
+    if (chemin.isEmpty()) {
+        m_infosItineraire->setText("Départ et arrivée identiques : cliquez plus loin.");
+        return;
+    }
+
+    // Points de l'itinéraire = traces des tronçons mises bout à bout
+    // (le premier point d'un tronçon est le dernier du précédent : on ne le répète pas).
+    QVector<QPointF> points;
+    double longueur = 0.0;
+    for (int t : chemin) {
+        const Troncon &troncon = m_graphe.troncons()[t];
+        longueur += troncon.longueur;
+        for (int i = points.isEmpty() ? 0 : 1; i < troncon.trace.size(); ++i)
+            points.append(troncon.trace[i]);
+    }
+    m_vue->afficherItineraire(points);
+
+    const QLocale fr;
+    m_infosItineraire->setText(
+        QString("<b><span style='color:%1'>%2 km</span></b> · %3 tronçons<br>"
+                "A* : %4 ms, %5 sommets visités<br>"
+                "Dijkstra : %6 ms, %7 sommets visités<br>"
+                "Cliquez un nouveau départ pour recommencer.")
+            .arg(MapView::couleurItineraire().name(),
+                 fr.toString(longueur / 1000.0, 'f', 2),
+                 fr.toString(chemin.size()),
+                 fr.toString(statsAStar.dureeMs, 'f', 2),
+                 fr.toString(statsAStar.sommetsVisites),
+                 fr.toString(statsDijkstra.dureeMs, 'f', 2),
+                 fr.toString(statsDijkstra.sommetsVisites)));
+    statusBar()->showMessage("Itinéraire calculé");
 }
 
 void MainWindow::ouvrirCarte()

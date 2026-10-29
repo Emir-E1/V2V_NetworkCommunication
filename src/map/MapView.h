@@ -46,7 +46,27 @@ public:
     static QColor couleurRoute(TypeRoute type);
     static double epaisseurRoute(TypeRoute type);  // en pixels écran
 
+    // ---- Étape 2 : test du plus court chemin et affichage du graphe routier ----
+
+    // Mode "itinéraire" : un simple clic (sans glisser) sur la carte émet clicCarte().
+    // Le clic-glisser continue de déplacer la carte.
+    void setModeItineraire(bool actif);
+    // Dessine un itinéraire (suite de points en mètres) par-dessus les routes.
+    void afficherItineraire(const QVector<QPointF> &points);
+    // Pastille "A" (numero 0, départ) ou "B" (numero 1, arrivée) à une position en mètres.
+    void afficherMarqueur(int numero, const QPointF &pos);
+    // Retire l'itinéraire et les deux pastilles.
+    void effacerItineraire();
+    // Points des intersections du graphe routier (remplace les précédents).
+    void afficherIntersections(const QVector<QPointF> &positions);
+    void setIntersectionsVisibles(bool visibles);
+
+    // Couleur de l'itinéraire, partagée avec le panneau.
+    static QColor couleurItineraire() { return QColor(0x7C, 0x3A, 0xED); }
+
 signals:
+    // Simple clic sur la carte en mode itinéraire (position en mètres).
+    void clicCarte(const QPointF &pos);
     // Émis quand l'utilisateur a fini de tracer une zone (rectangle en mètres).
     void zoneChoisie(const QRectF &zone);
     // Émis quand le mode sélection se termine (zone tracée ou annulée), pour décocher le bouton.
@@ -79,4 +99,13 @@ private:
     QRectF m_zone;
     QGraphicsPathItem *m_voile = nullptr;   // assombrit ce qui est HORS de la zone
     QGraphicsPathItem *m_cadre = nullptr;   // contour de la zone
+
+    // Itinéraire de test (étape 2). Pointeurs remis à nullptr quand la scène est vidée.
+    bool m_modeItineraire = false;
+    QPoint m_posAppui;                       // où le bouton a été enfoncé, pour distinguer clic et glisser
+    bool m_aGlisse = false;                  // la souris s'est éloignée de m_posAppui pendant l'appui
+    QGraphicsPathItem *m_itineraire = nullptr;
+    QGraphicsItem *m_marqueurs[2] = {nullptr, nullptr};  // pastilles A et B
+    QGraphicsItem *m_intersections = nullptr;
+    bool m_intersectionsVisibles = false;
 };

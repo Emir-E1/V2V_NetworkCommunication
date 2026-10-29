@@ -1,7 +1,9 @@
 #include "map/MapView.h"
 
+#include <QGraphicsEllipseItem>
 #include <QGraphicsItem>
 #include <QGraphicsPathItem>
+#include <QGraphicsSimpleTextItem>
 #include <QGraphicsScene>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -83,6 +85,39 @@ private:
     std::array<QVector<Trace>, 4> m_traces;  // une liste de routes par TypeRoute
     QRectF m_limites;
 };
+
+// Les intersections du graphe routier, dessinées comme des petits points.
+// Même principe que CoucheRoutes : un seul objet, seuls les points visibles sont dessinés.
+class CouchePoints : public QGraphicsItem
+{
+public:
+    explicit CouchePoints(QVector<QPointF> positions)
+        : m_positions(std::move(positions))
+    {
+        m_limites = QPolygonF(m_positions).boundingRect().adjusted(-10, -10, 10, 10);
+        setFlag(QGraphicsItem::ItemUsesExtendedStyleOption);
+        setCacheMode(QGraphicsItem::DeviceCoordinateCache);
+    }
+
+    QRectF boundingRect() const override { return m_limites; }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *) override
+    {
+        QVector<QPointF> visibles;
+        for (const QPointF &p : m_positions)
+            if (option->exposedRect.contains(p))
+                visibles.append(p);
+        QPen stylo(QColor(0x33, 0x41, 0x55), 4.0, Qt::SolidLine, Qt::RoundCap);
+        stylo.setCosmetic(true);  // 4 pixels quel que soit le zoom
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->setPen(stylo);
+        painter->drawPoints(visibles.constData(), visibles.size());  // un seul appel : rapide
+    }
+
+private:
+    QVector<QPointF> m_positions;
+    QRectF m_limites;
+};
 }
 
 MapView::MapView(QWidget *parent)
@@ -138,9 +173,12 @@ double MapView::epaisseurRoute(TypeRoute type)
 
 void MapView::afficherCarte(const OsmCarte &carte)
 {
-    scene()->clear();  // supprime aussi l'ancienne zone : on oublie nos pointeurs
+    scene()->clear();  // supprime aussi l'ancienne zone, l'itinéraire... : on oublie nos pointeurs
     m_voile = nullptr;
     m_cadre = nullptr;
+    m_itineraire = nullptr;
+    m_marqueurs[0] = m_marqueurs[1] = nullptr;
+    m_intersections = nullptr;
     m_zone = QRectF();
     // Un tracé de zone commencé sur l'ancienne carte n'a plus de sens : on l'annule.
     if (m_modeSelection) {
@@ -278,8 +316,87 @@ void MapView::afficherZone(const QRectF &zone)
     m_cadre->show();
 }
 
+// ---------------------------------------------------------------------------
+// Étape 2 : itinéraire de test et intersections du graphe routier
+// ---------------------------------------------------------------------------
+void MapView::setModeItineraire(bool actif)
+{
+    m_modeItineraire = actif;
+}
+
+void MapView::afficherItineraire(const QVector<QPointF> &points)
+{
+    if (!m_itineraire) {
+        QPen stylo(couleurItineraire(), 5.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        stylo.setCosmetic(true);
+        m_itineraire = scene()->addPath(QPainterPath(), stylo);
+        m_itineraire->setZValue(20);  // au-dessus des routes et de la zone
+        // Cache image : l'itinéraire ne change pas pendant l'animation des véhicules,
+        // inutile de le recalculer à chaque image.
+        m_itineraire->setCacheMode(QGraphicsItem::DeviceCoordinateCache);
+    }
+    QPainterPath chemin;
+    if (!points.isEmpty())
+        chemin.addPolygon(QPolygonF(points));  // polyligne ouverte (addPolygon ne referme pas)
+    m_itineraire->setPath(chemin);
+    m_itineraire->show();
+}
+
+void MapView::afficherMarqueur(int numero, const QPointF &pos)
+{
+    if (numero < 0 || numero > 1)
+        return;
+    if (!m_marqueurs[numero]) {
+        // Pastille ronde avec une lettre. ItemIgnoresTransformations : elle garde la même
+        // taille à l'écran quel que soit le zoom (comme une épingle sur une carte en ligne).
+        auto *rond = new QGraphicsEllipseItem(-10, -10, 20, 20);
+        rond->setBrush(numero == 0 ? QColor(0x16, 0xA3, 0x4A) : QColor(0xDC, 0x26, 0x26));  // vert / rouge
+        rond->setPen(QPen(Qt::white, 2));
+        rond->setFlag(QGraphicsItem::ItemIgnoresTransformations);
+        rond->setZValue(30);
+        auto *lettre = new QGraphicsSimpleTextItem(numero == 0 ? "A" : "B", rond);
+        QFont police = font();
+        police.setBold(true);
+        lettre->setFont(police);
+        lettre->setBrush(Qt::white);
+        lettre->setPos(-lettre->boundingRect().width() / 2, -lettre->boundingRect().height() / 2);
+        scene()->addItem(rond);
+        m_marqueurs[numero] = rond;
+    }
+    m_marqueurs[numero]->setPos(pos);
+    m_marqueurs[numero]->show();
+}
+
+void MapView::effacerItineraire()
+{
+    if (m_itineraire)
+        m_itineraire->hide();
+    for (QGraphicsItem *m : m_marqueurs)
+        if (m)
+            m->hide();
+}
+
+void MapView::afficherIntersections(const QVector<QPointF> &positions)
+{
+    delete m_intersections;  // delete d'un objet de la scène = il est aussi retiré de la scène
+    m_intersections = new CouchePoints(positions);
+    m_intersections->setZValue(5);  // au-dessus des routes, sous la zone
+    m_intersections->setVisible(m_intersectionsVisibles);
+    scene()->addItem(m_intersections);
+}
+
+void MapView::setIntersectionsVisibles(bool visibles)
+{
+    m_intersectionsVisibles = visibles;
+    if (m_intersections)
+        m_intersections->setVisible(visibles);
+}
+
 void MapView::mousePressEvent(QMouseEvent *event)
 {
+    m_posAppui = event->position().toPoint();  // pour savoir au relâchement si c'était un clic
+    m_aGlisse = false;
+
     if (m_modeSelection && event->button() == Qt::LeftButton) {
         m_selectionEnCours = true;
         m_debutSelection = mapToScene(event->position().toPoint());
@@ -292,6 +409,12 @@ void MapView::mousePressEvent(QMouseEvent *event)
 void MapView::mouseMoveEvent(QMouseEvent *event)
 {
     const QPointF p = mapToScene(event->position().toPoint());
+
+    // Dès que la souris s'éloigne de plus de 4 pixels pendant l'appui, c'est un
+    // glisser (déplacement de carte), même si elle revient ensuite au point de départ.
+    if ((event->buttons() & Qt::LeftButton)
+        && (event->position().toPoint() - m_posAppui).manhattanLength() > 4)
+        m_aGlisse = true;
 
     // Conversion inverse de OsmCarte::versMetres : mètres -> latitude / longitude.
     if (!m_limitesCarte.isEmpty()) {
@@ -323,6 +446,11 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
         return;
     }
     QGraphicsView::mouseReleaseEvent(event);
+
+    // Mode itinéraire : la souris n'a jamais glissé pendant l'appui,
+    // c'est donc un clic (et pas un déplacement de la carte).
+    if (m_modeItineraire && event->button() == Qt::LeftButton && !m_aGlisse)
+        emit clicCarte(mapToScene(event->position().toPoint()));
 }
 
 void MapView::keyPressEvent(QKeyEvent *event)
