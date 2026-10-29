@@ -1,0 +1,120 @@
+[1/45] N=1000, R=200 m, graine=1, durée simulée=60 s
+[2/45] N=1000, R=200 m, graine=2, durée simulée=60 s
+[3/45] N=1000, R=200 m, graine=3, durée simulée=60 s
+[4/45] N=1000, R=200 m, graine=4, durée simulée=60 s
+[5/45] N=1000, R=200 m, graine=5, durée simulée=60 s
+[6/45] N=1000, R=300 m, graine=1, durée simulée=60 s
+[7/45] N=1000, R=300 m, graine=2, durée simulée=60 s
+[8/45] N=1000, R=300 m, graine=3, durée simulée=60 s
+[9/45] N=1000, R=300 m, graine=4, durée simulée=60 s
+[10/45] N=1000, R=300 m, graine=5, durée simulée=60 s
+[11/45] N=1000, R=500 m, graine=1, durée simulée=60 s
+[12/45] N=1000, R=500 m, graine=2, durée simulée=60 s
+[13/45] N=1000, R=500 m, graine=3, durée simulée=60 s
+[14/45] N=1000, R=500 m, graine=4, durée simulée=60 s
+[15/45] N=1000, R=500 m, graine=5, durée simulée=60 s
+[16/45] N=2000, R=200 m, graine=1, durée simulée=60 s
+[17/45] N=2000, R=200 m, graine=2, durée simulée=60 s
+[18/45] N=2000, R=200 m, graine=3, durée simulée=60 s
+[19/45] N=2000, R=200 m, graine=4, durée simulée=60 s
+[20/45] N=2000, R=200 m, graine=5, durée simulée=60 s
+[21/45] N=2000, R=300 m, graine=1, durée simulée=60 s
+[22/45] N=2000, R=300 m, graine=2, durée simulée=60 s
+[23/45] N=2000, R=300 m, graine=3, durée simulée=60 s
+[24/45] N=2000, R=300 m, graine=4, durée simulée=60 s
+[25/45] N=2000, R=300 m, graine=5, durée simulée=60 s
+[26/45] N=2000, R=500 m, graine=1, durée simulée=60 s
+[27/45] N=2000, R=500 m, graine=2, durée simulée=60 s
+[28/45] N=2000, R=500 m, graine=3, durée simulée=60 s
+[29/45] N=2000, R=500 m, graine=4, durée simulée=60 s
+[30/45] N=2000, R=500 m, graine=5, durée simulée=60 s
+[31/45] N=3000, R=200 m, graine=1, durée simulée=60 s
+[32/45] N=3000, R=200 m, graine=2, durée simulée=60 s
+[33/45] N=3000, R=200 m, graine=3, durée simulée=60 s
+[34/45] N=3000, R=200 m, graine=4, durée simulée=60 s
+[35/45] N=3000, R=200 m, graine=5, durée simulée=60 s
+[36/45] N=3000, R=300 m, graine=1, durée simulée=60 s
+[37/45] N=3000, R=300 m, graine=2, durée simulée=60 s
+[38/45] N=3000, R=300 m, graine=3, durée simulée=60 s
+[39/45] N=3000, R=300 m, graine=4, durée simulée=60 s
+[40/45] N=3000, R=300 m, graine=5, durée simulée=60 s
+[41/45] N=3000, R=500 m, graine=1, durée simulée=60 s
+[42/45] N=3000, R=500 m, graine=2, durée simulée=60 s
+[43/45] N=3000, R=500 m, graine=3, durée simulée=60 s
+[44/45] N=3000, R=500 m, graine=4, durée simulée=60 s
+[45/45] N=3000, R=500 m, graine=5, durée simulée=60 s
+
+Bilan par densité et portée (moyennes sur toutes les graines et mesures)
+Stabilité : t=0 exclu pour chaque graine ; optimal : k = borne de clique.
+
+N=1000, R=200 m
+Algorithme          Mesures   k moyen   ms moyen     ms max  Stabilité  % optimal   % valide
+Glouton                 305    10.895      0.026      0.062   0.905643      81.31     100.00
+Welsh-Powell            305    10.731      0.079      0.102   0.711277      98.03     100.00
+DSATUR                  305    10.708      0.366      0.914   0.691553      99.67     100.00
+Recherche locale        305    10.708      2.685      6.318   0.691553      99.67     100.00
+
+N=1000, R=300 m
+Algorithme          Mesures   k moyen   ms moyen     ms max  Stabilité  % optimal   % valide
+Glouton                 305    14.859      0.034      0.075   0.871493      41.97     100.00
+Welsh-Powell            305    14.203      0.096      0.173   0.568557      82.62     100.00
+DSATUR                  305    14.079      0.620      0.846   0.514380      93.44     100.00
+Recherche locale        305    14.033      3.341      6.865   0.514280      98.03     100.00
+
+N=1000, R=500 m
+Algorithme          Mesures   k moyen   ms moyen     ms max  Stabilité  % optimal   % valide
+Glouton                 305    25.443      0.049      0.101   0.787227       3.61     100.00
+Welsh-Powell            305    23.541      0.128      0.193   0.373170      39.02     100.00
+DSATUR                  305    23.039      1.321      1.828   0.284083      68.52     100.00
+Recherche locale        305    22.875      4.725     10.044   0.283797      79.02     100.00
+
+N=2000, R=200 m
+Algorithme          Mesures   k moyen   ms moyen     ms max  Stabilité  % optimal   % valide
+Glouton                 305    17.321      0.070      0.108   0.830552      37.38     100.00
+Welsh-Powell            305    16.574      0.201      0.292   0.507103      90.49     100.00
+DSATUR                  305    16.498      1.291      1.542   0.465893      97.05     100.00
+Recherche locale        305    16.485      4.035      7.332   0.465870      98.36     100.00
+
+N=2000, R=300 m
+Algorithme          Mesures   k moyen   ms moyen     ms max  Stabilité  % optimal   % valide
+Glouton                 305    25.105      0.092      0.132   0.769600       9.84     100.00
+Welsh-Powell            305    23.593      0.252      0.409   0.369605      63.28     100.00
+DSATUR                  305    23.282      2.313      3.214   0.305988      86.23     100.00
+Recherche locale        305    23.226      5.689      8.813   0.305933      90.82     100.00
+
+N=2000, R=500 m
+Algorithme          Mesures   k moyen   ms moyen     ms max  Stabilité  % optimal   % valide
+Glouton                 305    44.607      0.140      0.195   0.641908       0.00     100.00
+Welsh-Powell            305    41.830      0.366      0.476   0.233427       7.54     100.00
+DSATUR                  305    39.830      5.163      5.832   0.154490      42.62     100.00
+Recherche locale        305    39.623     10.457     14.808   0.154403      49.18     100.00
+
+N=3000, R=200 m
+Algorithme          Mesures   k moyen   ms moyen     ms max  Stabilité  % optimal   % valide
+Glouton                 305    23.151      0.124      0.210   0.771669      27.54     100.00
+Welsh-Powell            305    22.023      0.358      0.591   0.396949      82.62     100.00
+DSATUR                  305    21.898      2.799      3.662   0.356468      93.44     100.00
+Recherche locale        305    21.882      5.996      9.693   0.356460      95.08     100.00
+
+N=3000, R=300 m
+Algorithme          Mesures   k moyen   ms moyen     ms max  Stabilité  % optimal   % valide
+Glouton                 305    33.902      0.166      0.265   0.691768       6.89     100.00
+Welsh-Powell            305    31.941      0.459      1.152   0.279406      49.51     100.00
+DSATUR                  305    31.505      5.109      6.035   0.220020      67.87     100.00
+Recherche locale        305    31.384      9.464     12.747   0.219963      75.74     100.00
+
+N=3000, R=500 m
+Algorithme          Mesures   k moyen   ms moyen     ms max  Stabilité  % optimal   % valide
+Glouton                 305    61.233      0.274      0.585   0.550522       0.00     100.00
+Welsh-Powell            305    57.751      0.707      1.360   0.174473       8.52     100.00
+DSATUR                  305    54.793     11.928     17.339   0.109472      30.16     100.00
+Recherche locale        305    54.561     19.597     25.019   0.109402      33.11     100.00
+
+Bilan global par algorithme
+Algorithme          Mesures   k moyen   ms moyen     ms max  Stabilité  % optimal   % valide
+Glouton                2745    28.502      0.109      0.585   0.757820      23.17     100.00
+Welsh-Powell           2745    26.910      0.294      1.360   0.401552      57.96     100.00
+DSATUR                 2745    26.181      3.435     17.339   0.344705      75.45     100.00
+Recherche locale       2745    26.086      7.332     25.019   0.344629      79.89     100.00
+
+Durée totale (chargement, simulation, mesures et CSV) : 86.286 s
