@@ -15,7 +15,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #   Widgets : fenêtres, boutons, et QGraphicsView pour dessiner la carte
 #   Charts  : courbes de comparaison Glouton / Welsh-Powell (étape 5)
 #   Xml     : QXmlStreamReader pour lire le fichier .osm (étape 1)
-find_package(Qt6 REQUIRED COMPONENTS Widgets Charts Xml)
+#   OpenGL, OpenGLWidgets : vue 3D (QOpenGLWidget, shaders), dessinée par la carte graphique
+find_package(Qt6 REQUIRED COMPONENTS Widgets Charts Xml OpenGL OpenGLWidgets)
 
 # Réglages Qt par défaut (active notamment le moc, qui gère Q_OBJECT / signaux-slots).
 qt_standard_project_setup()
@@ -50,6 +51,11 @@ add_library(v2v-coloration STATIC src/coloring/Coloring.h src/coloring/Coloring.
 target_include_directories(v2v-coloration PUBLIC src)
 target_link_libraries(v2v-coloration PUBLIC Qt6::Core)
 
+# Vue 3D : lecture des bâtiments et calcul de leurs volumes (murs + toit), sans OpenGL
+# (donc testable sans écran). L'affichage lui-même est dans src/vue3d/Vue3D.cpp.
+add_library(v2v-batiments STATIC src/vue3d/Batiments.h src/vue3d/Batiments.cpp)
+target_link_libraries(v2v-batiments PUBLIC v2v-carte)
+
 # ---- Application ----
 # WIN32 = pas de console noire sous Windows ; MACOSX_BUNDLE = vraie appli sous macOS.
 # Chaque nouveau fichier .h/.cpp doit être ajouté ici (ou dans un module), sinon il n'est pas compilé.
@@ -66,10 +72,14 @@ qt_add_executable(v2v-simulator WIN32 MACOSX_BUNDLE
     # Affichage de la carte (zoom, déplacement, zone, itinéraire, véhicules, arêtes)
     src/map/MapView.h
     src/map/MapView.cpp
+    # Vue 3D : ville, bâtiments, voitures et arcs d'interférence dessinés par OpenGL
+    src/vue3d/Vue3D.h
+    src/vue3d/Vue3D.cpp
+    src/vue3d/Shaders3D.h
 )
 target_link_libraries(v2v-simulator PRIVATE
-    v2v-carte v2v-graphe v2v-simulation v2v-interference v2v-coloration
-    Qt6::Widgets Qt6::Charts)
+    v2v-carte v2v-graphe v2v-simulation v2v-interference v2v-coloration v2v-batiments
+    Qt6::Widgets Qt6::Charts Qt6::OpenGL Qt6::OpenGLWidgets)
 
 # Chemin du dossier data/ du projet, connu à la compilation : permet d'ouvrir
 # data/mulhouse.osm automatiquement au lancement, sur le PC de chacun.
@@ -104,6 +114,11 @@ add_test(NAME test_interference COMMAND test_interference)
 add_executable(test_coloring tests/test_coloring.cpp)
 target_link_libraries(test_coloring PRIVATE v2v-coloration)
 add_test(NAME test_coloring COMMAND test_coloring)
+
+# Bâtiments de la vue 3D : lecture du fichier, découpage des toits en triangles, volumes.
+add_executable(test_batiments tests/test_batiments.cpp)
+target_link_libraries(test_batiments PRIVATE v2v-batiments)
+add_test(NAME test_batiments COMMAND test_batiments)
 
 # ---- Étude comparative (hors application) ----
 # Programme en ligne de commande qui rejoue de nombreux scénarios (nombre de véhicules,

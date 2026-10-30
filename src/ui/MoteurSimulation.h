@@ -39,6 +39,8 @@ struct Instantane
     int generation = 0;                  ///< numéro de la simulation qui l'a produit (voir demarrer())
     QVector<QPointF> positions;          ///< position de chaque véhicule (mètres)
     QVector<int> couleurs;               ///< canal de chaque véhicule (algorithme affiché), -1 = pas encore coloré
+    QVector<float> caps;                 ///< direction de chaque véhicule (radians, atan2(dy, dx)) : vue 3D
+    QVector<float> vitesses;             ///< vitesse de chaque véhicule (m/s) : fiche de la vue 3D
     QVector<QPair<int, int>> aretes;     ///< arêtes d'interférence (seulement si nouvellesAretes)
     bool nouvellesAretes = false;        ///< true juste après un recalcul du graphe
     double temps = 0.0;                  ///< temps simulé en secondes

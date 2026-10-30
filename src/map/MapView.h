@@ -93,6 +93,8 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    // Premier affichage après un chargement fait pendant que la vue 3D était affichée.
+    void showEvent(QShowEvent *event) override;
     // Dessine par-dessus la carte, en coordonnées écran : l'échelle graphique.
     void drawForeground(QPainter *painter, const QRectF &rect) override;
 
@@ -104,6 +106,7 @@ private:
     double m_latRef = 0.0;
     double m_lonRef = 0.0;
     QRectF m_limitesCarte;  // rectangle englobant les routes, en mètres
+    bool m_recentrerAuProchainAffichage = false;  // recentrer() demandé pendant que la vue était cachée
 
     // Sélection de zone
     bool m_modeSelection = false;

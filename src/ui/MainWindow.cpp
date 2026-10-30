@@ -6,9 +6,14 @@
 #include "map/MapView.h"
 #include "map/OsmLoader.h"
 #include "ui/FenetreComparaison.h"
+#include "vue3d/Batiments.h"
+#include "vue3d/Vue3D.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
+#include <QDir>
+#include <QStackedWidget>
 #include <QComboBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
@@ -50,10 +55,16 @@ constexpr int NOMBRE_FACTEURS = sizeof(FACTEURS_TEMPS) / sizeof(FACTEURS_TEMPS[0
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_vue(new MapView(this))
+    , m_vue3d(new Vue3D(this))
+    , m_pile(new QStackedWidget(this))
 {
-    setWindowTitle("Simulateur V2V");
+    setWindowTitle("Simulateur V2V 3D");
     resize(1280, 800);
-    setCentralWidget(m_vue);
+    // Les deux vues sont créées dès le départ (la vue 3D a besoin d'être dans la fenêtre
+    // avant son premier affichage) ; la pile n'en montre qu'une à la fois.
+    m_pile->addWidget(m_vue);
+    m_pile->addWidget(m_vue3d);
+    setCentralWidget(m_pile);
 
     // ---- Moteur de simulation dans son propre fil d'exécution ----
     // Le moteur n'a pas de parent : un objet ne peut pas changer de fil s'il a un parent.
@@ -75,15 +86,39 @@ MainWindow::MainWindow(QWidget *parent)
     actionOuvrir->setToolTip("Ouvrir un fichier OpenStreetMap (.osm) — Ctrl+O");
     connect(actionOuvrir, &QAction::triggered, this, &MainWindow::ouvrirCarte);
 
+    // Choix de la vue : deux boutons dont un seul est enfoncé (groupe exclusif).
+    m_action2D = new QAction("Carte 2D", this);
+    m_action2D->setCheckable(true);
+    m_action2D->setShortcut(Qt::Key_2);
+    m_action2D->setToolTip("Carte vue de dessus : zone, itinéraire, intersections — touche 2");
+    m_action3D = new QAction("Vue 3D", this);
+    m_action3D->setCheckable(true);
+    m_action3D->setShortcut(Qt::Key_3);
+    m_action3D->setToolTip("Ville en 3D : bâtiments, voitures, arcs d'interférence, portée radio — touche 3");
+    auto *groupeVues = new QActionGroup(this);
+    groupeVues->addAction(m_action2D);
+    groupeVues->addAction(m_action3D);
+    connect(m_action2D, &QAction::triggered, this, [this] { afficherVue3D(false); });
+    connect(m_action3D, &QAction::triggered, this, [this] { afficherVue3D(true); });
+
     m_actionRecentrer = new QAction("Recentrer", this);
     m_actionRecentrer->setShortcut(Qt::Key_R);
     m_actionRecentrer->setToolTip("Afficher toute la carte — R");
-    connect(m_actionRecentrer, &QAction::triggered, m_vue, &MapView::recentrer);
+    connect(m_actionRecentrer, &QAction::triggered, this, [this] {
+        if (m_pile->currentWidget() == m_vue3d)
+            m_vue3d->recentrer();
+        else
+            m_vue->recentrer();
+    });
 
     m_actionZone = new QAction("Choisir la zone", this);
     m_actionZone->setCheckable(true);  // bouton enfoncé tant qu'on trace la zone
     m_actionZone->setShortcut(Qt::Key_Z);
     m_actionZone->setToolTip("Tracer à la souris la zone de simulation (Échap pour annuler) — Z");
+    connect(m_actionZone, &QAction::toggled, this, [this](bool actif) {
+        if (actif)
+            afficherVue3D(false);  // la zone se trace sur la carte 2D, vue de dessus
+    });
     connect(m_actionZone, &QAction::toggled, m_vue, &MapView::setModeSelectionZone);
     connect(m_actionZone, &QAction::toggled, this, [this](bool actif) {
         if (actif && m_actionItineraire)
@@ -107,8 +142,10 @@ MainWindow::MainWindow(QWidget *parent)
     m_actionItineraire->setShortcut(Qt::Key_I);
     m_actionItineraire->setToolTip("Cliquer un départ puis une arrivée pour voir le plus court chemin — I");
     connect(m_actionItineraire, &QAction::toggled, this, [this](bool actif) {
-        if (actif)
+        if (actif) {
+            afficherVue3D(false);             // les points se cliquent sur la carte 2D
             m_actionZone->setChecked(false);  // un seul mode "clic sur la carte" à la fois
+        }
         m_vue->setModeItineraire(actif);
         m_depart = -1;
         if (actif) {
@@ -133,6 +170,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_actionAretes->setShortcut(Qt::Key_E);
     m_actionAretes->setToolTip("Afficher les arêtes du graphe d'interférences — E");
     connect(m_actionAretes, &QAction::toggled, m_vue, &MapView::setAretesVisibles);
+    connect(m_actionAretes, &QAction::toggled, m_vue3d, &Vue3D::setAretesVisibles);
 
     // ---- Contrôle du temps (étape 3) : barre du bas ----
     m_actionLecture = new QAction("Démarrer", this);
@@ -183,6 +221,9 @@ MainWindow::MainWindow(QWidget *parent)
     menuFichier->addAction("&Quitter", QKeySequence::Quit, this, &QWidget::close);
 
     auto *menuCarte = menuBar()->addMenu("&Carte");
+    menuCarte->addAction(m_action2D);
+    menuCarte->addAction(m_action3D);
+    menuCarte->addSeparator();
     menuCarte->addAction(m_actionRecentrer);
     menuCarte->addAction(m_actionZone);
     menuCarte->addAction(m_actionEffacerZone);
@@ -208,6 +249,9 @@ MainWindow::MainWindow(QWidget *parent)
     barre->setMovable(false);
     barre->setToolButtonStyle(Qt::ToolButtonTextOnly);
     barre->addAction(actionOuvrir);
+    barre->addSeparator();
+    barre->addAction(m_action2D);
+    barre->addAction(m_action3D);
     barre->addSeparator();
     barre->addAction(m_actionRecentrer);
     barre->addAction(m_actionZone);
@@ -247,11 +291,13 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->showMessage("Aucune carte chargée — Fichier > Ouvrir une carte… (Ctrl+O)");
 
     // ---- Réactions aux événements de la carte ----
-    connect(m_vue, &MapView::positionSouris, this, [this](double lat, double lon) {
+    const auto afficherCoordonnees = [this](double lat, double lon) {
         m_coordonnees->setText(QString("%1° N   %2° E")
                                    .arg(QLocale().toString(lat, 'f', 5))
                                    .arg(QLocale().toString(lon, 'f', 5)));
-    });
+    };
+    connect(m_vue, &MapView::positionSouris, this, afficherCoordonnees);
+    connect(m_vue3d, &Vue3D::positionSouris, this, afficherCoordonnees);
     connect(m_vue, &MapView::zoneChoisie, this, [this] {
         majInfosZone();
         construireGraphe();  // le graphe se limite à la nouvelle zone
@@ -262,6 +308,24 @@ MainWindow::MainWindow(QWidget *parent)
         m_actionZone->setChecked(false);
         majInfosZone();
     });
+
+    // Version 3D : on ouvre directement sur la vue 3D (la carte 2D reste à un clic, touche 2).
+    afficherVue3D(true);
+}
+
+void MainWindow::afficherVue3D(bool vue3d)
+{
+    m_pile->setCurrentWidget(vue3d ? static_cast<QWidget *>(m_vue3d) : m_vue);
+    (vue3d ? m_action3D : m_action2D)->setChecked(true);
+    // Tracer une zone ou cliquer un itinéraire se fait sur la carte 2D : on quitte ces modes.
+    if (vue3d) {
+        m_actionZone->setChecked(false);
+        m_actionItineraire->setChecked(false);
+    }
+    m_aide->setText(vue3d ? "Glisser : déplacer   ·   Clic droit + glisser : tourner   ·   Molette : zoom<br>"
+                            "Clic sur un véhicule : sa portée et ses voisins   ·   Double-clic : le suivre"
+                          : "Molette : zoom   ·   Clic-glisser : déplacer");
+    m_pile->currentWidget()->setFocus();  // le clavier (Échap, F...) va à la vue affichée
 }
 
 QWidget *MainWindow::creerPanneau()
@@ -363,6 +427,7 @@ QWidget *MainWindow::creerPanneau()
 
     connect(m_rayon, &QDoubleSpinBox::valueChanged, this, [this](double rayon) {
         QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, rayon] { moteur->setRayon(rayon); }, Qt::QueuedConnection);
+        m_vue3d->setRayon(rayon);  // taille de la bulle de portée dans la vue 3D
     });
     connect(m_intervalle, &QDoubleSpinBox::valueChanged, this, [this](double secondes) {
         QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, secondes] { moteur->setIntervalleRecalcul(secondes); },
@@ -446,11 +511,11 @@ QWidget *MainWindow::creerPanneau()
     }
     layout->addWidget(groupeLegende);
 
-    // -- Aide rapide pour se déplacer sur la carte --
-    auto *aide = new QLabel("Molette : zoom   ·   Clic-glisser : déplacer");
-    aide->setStyleSheet("color: palette(mid);");
-    aide->setWordWrap(true);
-    layout->addWidget(aide);
+    // -- Aide rapide pour se déplacer (texte selon la vue, voir afficherVue3D) --
+    m_aide = new QLabel;
+    m_aide->setStyleSheet("color: palette(mid);");
+    m_aide->setWordWrap(true);
+    layout->addWidget(m_aide);
 
     layout->addStretch();  // pousse les groupes vers le haut
     majInfosZone();
@@ -476,15 +541,27 @@ bool MainWindow::chargerCarte(const QString &chemin)
 
     m_carte = std::move(carte);
     m_vue->afficherCarte(m_carte);
+    m_vue3d->afficherCarte(m_carte);
+
+    // Bâtiments de la vue 3D : fichier « <nom de la carte>_batiments.txt » rangé à côté de
+    // la carte (data/mulhouse_batiments.txt, voir data/telecharger_batiments.py).
+    // Sans ce fichier, la vue 3D montre la ville sans bâtiments.
+    const QFileInfo infoCarte(chemin);
+    const QString cheminBatiments = infoCarte.dir().filePath(infoCarte.completeBaseName() + "_batiments.txt");
+    QVector<Batiment> batiments;
+    if (QFileInfo::exists(cheminBatiments) && Batiments::charger(cheminBatiments, m_carte, batiments))
+        m_vue3d->afficherBatiments(Batiments::construireMaillage(batiments));
     const qint64 ms = chrono.elapsed();
     QApplication::restoreOverrideCursor();
 
     const QLocale fr;
-    m_infosCarte->setText(QString("<b>%1</b><br>%2 routes · %3 nœuds")
-                              .arg(QFileInfo(chemin).fileName().toHtmlEscaped(),
+    m_infosCarte->setText(QString("<b>%1</b><br>%2 routes · %3 nœuds<br>%4")
+                              .arg(infoCarte.fileName().toHtmlEscaped(),
                                    fr.toString(m_carte.routes.size()),
-                                   fr.toString(m_carte.noeuds.size())));
-    setWindowTitle(QString("Simulateur V2V — %1").arg(QFileInfo(chemin).fileName()));
+                                   fr.toString(m_carte.noeuds.size()),
+                                   batiments.isEmpty() ? QString("Pas de bâtiments pour la vue 3D")
+                                                       : QString("%1 bâtiments (vue 3D)").arg(fr.toString(batiments.size()))));
+    setWindowTitle(QString("Simulateur V2V 3D — %1").arg(infoCarte.fileName()));
     statusBar()->showMessage(QString("Carte chargée en %1 ms").arg(ms));
 
     for (QAction *a : {m_actionRecentrer, m_actionZone, m_actionEffacerZone, m_actionItineraire, m_actionIntersections,
@@ -555,6 +632,7 @@ void MainWindow::lancerSimulation()
     m_actionLecture->setChecked(false);  // une nouvelle simulation démarre en pause
     m_comparaison->vider();
     const int generation = ++m_generation;  // tout message de l'ancienne simulation sera ignoré
+    m_vue3d->effacerVehicules();  // nouveaux véhicules : l'ancien véhicule choisi n'a plus de sens
     m_infosInterference->setText("Pas encore calculé.");
     m_infosColoration->setText("Pas encore calculée.");
     m_indicateurs->clear();
@@ -593,12 +671,17 @@ void MainWindow::recevoirInstantane(const Instantane &instantane)
         m_moteur->instantaneAffiche();
         return;
     }
+    // Les deux vues reçoivent tout : seule celle qui est affichée se redessine.
     if (instantane.positions.isEmpty()) {
         m_vue->effacerVehicules();
+        m_vue3d->effacerVehicules();
     } else {
         m_vue->afficherVehicules(instantane.positions, instantane.couleurs);
-        if (instantane.nouvellesAretes)
+        m_vue3d->afficherVehicules(instantane.positions, instantane.couleurs, instantane.caps, instantane.vitesses);
+        if (instantane.nouvellesAretes) {
             m_vue->afficherAretes(instantane.aretes);
+            m_vue3d->afficherAretes(instantane.aretes);
+        }
     }
 
     const int secondes = static_cast<int>(instantane.temps);
@@ -796,6 +879,7 @@ void MainWindow::ouvrirCarte()
 void MainWindow::majInfosZone()
 {
     const QRectF zone = m_vue->zone();
+    m_vue3d->setZone(zone);  // contour bleu au sol dans la vue 3D
     m_actionEffacerZone->setEnabled(!zone.isEmpty());
 
     if (m_carte.routes.isEmpty()) {

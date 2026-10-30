@@ -16,10 +16,13 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QSpinBox;
+class QStackedWidget;
 class QThread;
+class Vue3D;
 
 /// Fenêtre principale du simulateur (disposition décrite dans le cahier des charges, §5) :
-///   - au centre : la carte (MapView) avec les routes, les véhicules colorés et les arêtes
+///   - au centre : la carte, au choix en 2D (MapView : routes, véhicules colorés, arêtes)
+///     ou en 3D (Vue3D : la même chose en perspective, avec les bâtiments) ; touches 2 et 3
 ///   - en haut   : la barre d'outils (ouvrir une carte, zone, itinéraire, affichages)
 ///   - à droite  : le panneau de contrôle (carte, zone, graphe, simulation, coloration)
 ///   - en bas    : la barre de contrôle du temps (démarrer, pause, accélérer, ralentir,
@@ -43,6 +46,7 @@ private:
     void clicItineraire(const QPointF &pos);  // 1er clic = départ A, 2e clic = arrivée B
     QWidget *creerPanneau();   // construit le panneau de contrôle de droite
     void creerBarreTemps();    // construit la barre du bas (contrôle du temps)
+    void afficherVue3D(bool vue3d);  // bascule entre la carte 2D et la vue 3D
 
     // ---- Simulation (étapes 3 à 5) ----
     void lancerSimulation();   // (re)crée la simulation sur le graphe actuel avec les réglages du panneau
@@ -52,6 +56,8 @@ private:
     void majLegendeCanaux(int nombre);    // pastilles de couleur des canaux utilisés
 
     MapView *m_vue;
+    Vue3D *m_vue3d;            // vue 3D : reçoit les mêmes données que la carte 2D
+    QStackedWidget *m_pile;    // montre l'une des deux vues à la fois
     OsmCarte m_carte;          // la carte chargée
     GrapheRoutier m_graphe;    // graphe routier de la zone (étape 2), copié dans le moteur de simulation
     int m_depart = -1;         // sommet de départ de l'itinéraire de test (-1 = pas encore choisi)
@@ -78,6 +84,7 @@ private:
     QLabel *m_tempsSimule = nullptr;
     QLabel *m_facteurTemps = nullptr;
     QLabel *m_imagesParSeconde = nullptr;
+    QLabel *m_aide = nullptr;         // rappel des gestes de souris, selon la vue affichée
 
     QSpinBox *m_nombreVehicules = nullptr;
     QDoubleSpinBox *m_rayon = nullptr;
@@ -85,6 +92,8 @@ private:
     QSpinBox *m_graine = nullptr;
     QComboBox *m_algoAffiche = nullptr;
 
+    QAction *m_action2D = nullptr;           // afficher la carte 2D (touche 2)
+    QAction *m_action3D = nullptr;           // afficher la vue 3D (touche 3)
     QAction *m_actionRecentrer = nullptr;
     QAction *m_actionZone = nullptr;
     QAction *m_actionEffacerZone = nullptr;

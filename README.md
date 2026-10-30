@@ -1,14 +1,22 @@
-# Simulateur V2V — coloration de graphes
+# Simulateur V2V — coloration de graphes (version 3D)
 
 Application C++ qui simule des communications véhicule à véhicule (V2V) sur le vrai réseau routier de **Mulhouse**.
 Elle charge une carte OpenStreetMap, fait rouler **2000 véhicules** (ou plus) sur les routes, construit le
 **graphe d'interférences** entre véhicules proches et attribue un **canal radio** à chacun par **coloration de graphe**.
 Quatre algorithmes sont comparés en direct : Glouton, Welsh–Powell, DSATUR et une recherche locale (tabou).
 
+Cette version ajoute une **vue 3D** de la ville : les 74 000 bâtiments de Mulhouse en volume, chaque véhicule en
+petite voiture de la couleur de son canal, les arêtes d'interférence en arcs au-dessus des toits, et pour le
+véhicule choisi à la souris sa portée radio (bulle) et ses liens vers ses voisins. La carte 2D reste disponible
+(touche **2**).
+
+> **Deux versions séparées** : la version 3D est sur la branche `version-3d` ; la version 2D seule, inchangée,
+> est sur la branche `setup/squelette`. Elles partagent les mêmes calculs (simulation, interférences, coloration).
+
 > Master 1 Informatique et Mobilité — UE Réseaux Mobiles, Université de Haute-Alsace, automne 2026.
 > Encadrant : Laurent Moalic.
 
-![Simulation de 2000 véhicules colorés par DSATUR, arêtes d'interférence affichées](docs/images/simulation.png)
+![Vue 3D : 2000 véhicules colorés par DSATUR dans Mulhouse](docs/images/vue3d.jpg)
 
 ## Fonctionnalités
 
@@ -21,6 +29,17 @@ Les cinq étapes du sujet sont réalisées :
 | 3. Simulation | 2000 véhicules (position, vitesse, direction, destination, portée radio), plus court chemin vers une destination aléatoire, vitesse selon le type de route ; démarrer, pause, accélérer, ralentir, réinitialiser ; simulation dans un fil séparé de l'affichage (25 images/s) |
 | 4. Graphe d'interférences | Arête si distance < max(rA, rB), grille spatiale de taille R, recalcul périodique, arêtes affichables, nombre d'arêtes et degrés moyen/maximal |
 | 5. Coloration et analyse | Glouton, Welsh–Powell, DSATUR, recherche locale ; vérification automatique de la validité ; nombre de canaux k(t), temps de calcul, stabilité S(t) ; fenêtre de comparaison (tableau + courbes) ; export CSV |
+| Vue 3D | Ville en perspective avec ses bâtiments (OpenStreetMap), voitures 3D orientées dans leur sens de marche et colorées par canal, arêtes en arcs, caméra libre (tourner, incliner, zoomer), véhicule choisi : bulle de portée R, liens vers ses voisins, fiche (canal, nombre de voisins, vitesse), caméra qui le suit |
+
+![Véhicule choisi : sa portée radio et ses 30 voisins, chacun sur un autre canal](docs/images/vue3d_voisins.jpg)
+
+![Arêtes du graphe d'interférences en arcs au-dessus de la ville (touche E)](docs/images/vue3d_aretes.jpg)
+
+![Caméra qui suit un véhicule dans la rue](docs/images/vue3d_rue.jpg)
+
+La même simulation en carte 2D (touche **2**) et la fenêtre de comparaison des algorithmes :
+
+![Carte 2D : 2000 véhicules colorés par DSATUR, arêtes d'interférence affichées](docs/images/simulation.png)
 
 ![Fenêtre de comparaison des algorithmes](docs/images/comparaison.png)
 
@@ -28,7 +47,10 @@ Les cinq étapes du sujet sont réalisées :
 
 - Un compilateur **C++17** : MinGW 13 (fourni avec Qt sous Windows), GCC, Clang ou MSVC
 - **CMake 3.20** ou plus récent (celui fourni avec Qt convient)
-- **Qt 6** (testé avec Qt 6.8.3) avec les modules **Widgets**, **Charts** et **Xml**
+- **Qt 6** (testé avec Qt 6.8.3) avec les modules **Widgets**, **Charts**, **Xml**, **OpenGL** et
+  **OpenGLWidgets** (ces deux derniers sont fournis avec Qt, rien à cocher en plus)
+- Pour la vue 3D : une carte graphique compatible **OpenGL 3.3** (tous les PC depuis 2012 environ ; testé sur
+  Intel UHD et NVIDIA GTX 1650)
 
 Installer Qt sous Windows sans compte, en ligne de commande (dossier `C:\Qt`) :
 
@@ -60,8 +82,8 @@ Sous Linux / macOS : `cmake -S . -B build -DCMAKE_PREFIX_PATH=<dossier de Qt 6>`
 build\v2v-simulator.exe
 ```
 
-La carte de Mulhouse (`data/mulhouse.osm`) s'ouvre automatiquement. Une autre carte : `v2v-simulator <fichier.osm>`
-ou **Fichier > Ouvrir une carte…**.
+La carte de Mulhouse (`data/mulhouse.osm`) et ses bâtiments (`data/mulhouse_batiments.txt`) s'ouvrent
+automatiquement, en vue 3D. Une autre carte : `v2v-simulator <fichier.osm>` ou **Fichier > Ouvrir une carte…**.
 
 Pour lancer l'exécutable par double-clic sous Windows, copier une fois les bibliothèques de Qt à côté :
 
@@ -72,10 +94,13 @@ C:\Qt\6.8.3\mingw_64\bin\windeployqt.exe --release build\v2v-simulator.exe
 ## Utilisation rapide
 
 1. **Espace** : démarrer / mettre en pause. **+** / **-** : accélérer / ralentir (×0,25 à ×32).
-2. **Z** puis clic-glisser : choisir une zone de simulation. **Suppr** : revenir à toute la carte.
-3. Panneau de droite : nombre de véhicules, portée R, intervalle de recalcul, graine, algorithme dont les couleurs sont affichées.
-4. **E** : afficher les arêtes d'interférence. **G** : afficher les intersections. **I** : tester un plus court chemin.
-5. **Simulation > Comparaison des algorithmes…** : tableau et courbes ; **Exporter CSV…** pour les mesures.
+2. **3** : vue 3D ; **2** : carte 2D.
+3. Vue 3D : glisser = déplacer ; clic droit + glisser = tourner et incliner ; molette = zoom ;
+   clic sur un véhicule = sa portée et ses voisins ; double-clic (ou **F**) = le suivre ; **Échap** = annuler.
+4. **Z** puis clic-glisser : choisir une zone de simulation (sur la carte 2D). **Suppr** : revenir à toute la carte.
+5. Panneau de droite : nombre de véhicules, portée R, intervalle de recalcul, graine, algorithme dont les couleurs sont affichées.
+6. **E** : afficher les arêtes d'interférence. **G** : afficher les intersections. **I** : tester un plus court chemin.
+7. **Simulation > Comparaison des algorithmes…** : tableau et courbes ; **Exporter CSV…** pour les mesures.
 
 Le détail est dans le [manuel utilisateur et développeur](docs/manuel.md).
 
@@ -92,6 +117,7 @@ ctest --test-dir build --output-on-failure
 | `test_simulation` | déplacement le long des tronçons, arrivées, grands pas de temps, reproductibilité |
 | `test_interference` | la grille spatiale donne exactement les mêmes arêtes que la comparaison de toutes les paires |
 | `test_coloring` | les 4 algorithmes sur des graphes connus (complet, cycles, biparti, Petersen...) et validité |
+| `test_batiments` | lecture du fichier de bâtiments, découpage des toits en triangles (surface conservée), volumes des bâtiments |
 
 ## Résultats
 
@@ -119,9 +145,10 @@ src/
   interference/  graphe d'interférences avec grille spatiale (InterferenceGraph)
   coloring/      Glouton, Welsh-Powell, DSATUR, recherche locale (Coloring)
   ui/            fenêtre principale, moteur de simulation (fil séparé), fenêtre de comparaison
+  vue3d/         vue 3D OpenGL (Vue3D, Shaders3D), bâtiments en volume (Batiments)
 tests/           un test automatique par module (ctest)
 outils/          etude_coloration : étude comparative en ligne de commande
-data/            mulhouse.osm et le script qui le télécharge
+data/            mulhouse.osm, mulhouse_batiments.txt et les scripts qui les téléchargent
 docs/            manuel, étude comparative, captures d'écran
 ```
 
@@ -129,6 +156,9 @@ docs/            manuel, étude comparative, captures d'écran
 
 `data/mulhouse.osm` contient les routes carrossables de Mulhouse et de sa proche banlieue (environ 8 km × 8 km),
 extraites d'OpenStreetMap avec l'API Overpass par `data/telecharger_carte.py`.
+`data/mulhouse_batiments.txt` contient les 73 878 bâtiments de la même zone (contour et hauteur), extraits par
+`data/telecharger_batiments.py` dans un format texte compact (4,5 Mo au lieu d'environ 70 Mo en XML OSM).
+Quand OSM ne donne pas la hauteur d'un bâtiment (cas de la plupart), elle est estimée d'après son type et sa surface.
 Données © les contributeurs d'OpenStreetMap, disponibles sous licence ODbL.
 
 ## Équipe

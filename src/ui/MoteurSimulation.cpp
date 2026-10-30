@@ -192,9 +192,13 @@ void MoteurSimulation::envoyerInstantane(bool nouvellesAretes, bool forcer)
     instantane.generation = m_generation;
     const QVector<Vehicule> &vehicules = m_simulation.vehicules();
     instantane.positions.reserve(vehicules.size());
+    instantane.caps.reserve(vehicules.size());
+    instantane.vitesses.reserve(vehicules.size());
     double sommeVitesses = 0.0;
     for (const Vehicule &v : vehicules) {
         instantane.positions.append(v.position);
+        instantane.caps.append(float(v.direction));
+        instantane.vitesses.append(float(v.vitesse));
         sommeVitesses += v.vitesse;
     }
     instantane.couleurs = m_couleurs[static_cast<int>(m_algoAffiche)];

@@ -7,12 +7,35 @@
 #include <QApplication>
 #include <QFileInfo>
 #include <QLocale>
+#include <QSurfaceFormat>
 #include <QTimer>
 
 #include "ui/MainWindow.h"
 
+#ifdef _WIN32
+// Ordinateurs portables à deux cartes graphiques (intégrée Intel + NVIDIA ou AMD) : sans
+// rien dire, Windows lance souvent le programme sur la carte intégrée, bien plus lente
+// pour la vue 3D. Les pilotes NVIDIA et AMD lisent ces deux variables exportées par le
+// programme et choisissent alors la carte la plus puissante.
+extern "C" {
+__declspec(dllexport) unsigned long NvOptimusEnablement = 1;
+__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+}
+#endif
+
 int main(int argc, char *argv[])
 {
+    // Vue 3D : OpenGL 3.3 « core » (shaders modernes), tampon de profondeur (un objet proche
+    // cache un objet lointain) et 4 échantillons par pixel (bords lissés). À régler AVANT de
+    // créer QApplication : sous macOS c'est obligatoire pour que tous les contextes OpenGL
+    // de l'application soient compatibles entre eux.
+    QSurfaceFormat format;
+    format.setVersion(3, 3);
+    format.setProfile(QSurfaceFormat::CoreProfile);
+    format.setDepthBufferSize(24);
+    format.setSamples(4);
+    QSurfaceFormat::setDefaultFormat(format);
+
     // QApplication gère la boucle d'événements (clics, clavier, redessin).
     QApplication app(argc, argv);
     QApplication::setApplicationName("Simulateur V2V");

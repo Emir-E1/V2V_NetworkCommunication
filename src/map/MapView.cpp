@@ -363,11 +363,26 @@ void MapView::recentrer()
 {
     if (m_limitesCarte.isEmpty())
         return;
+    // Carte cachée (la vue 3D est affichée) : sa taille n'est pas encore la bonne, le
+    // cadrage serait faux. On le fera quand elle s'affichera (voir showEvent).
+    if (!isVisible()) {
+        m_recentrerAuProchainAffichage = true;
+        return;
+    }
     fitInView(m_limitesCarte, Qt::KeepAspectRatio);
     // Très petite carte : fitInView zoomerait au-delà du maximum autorisé.
     if (echelle() > ZOOM_MAX) {
         const double facteur = ZOOM_MAX / echelle();
         scale(facteur, facteur);
+    }
+}
+
+void MapView::showEvent(QShowEvent *event)
+{
+    QGraphicsView::showEvent(event);  // à ce moment la vue a déjà sa taille définitive
+    if (m_recentrerAuProchainAffichage) {
+        m_recentrerAuProchainAffichage = false;
+        recentrer();
     }
 }
 

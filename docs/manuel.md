@@ -27,9 +27,14 @@ leurs émissions radio se gênent s'ils utilisent le même canal. Le simulateur 
 4. construit régulièrement le **graphe d'interférences** : un sommet par véhicule, une arête entre deux
    véhicules plus proches que leur portée radio ;
 5. attribue un canal à chaque véhicule par **coloration** de ce graphe (deux voisins = deux canaux différents)
-   et compare quatre algorithmes : nombre de canaux, temps de calcul, stabilité dans le temps.
+   et compare quatre algorithmes : nombre de canaux, temps de calcul, stabilité dans le temps ;
+6. montre le tout au choix sur une **carte 2D** ou dans une **vue 3D** de la ville (bâtiments, voitures, arcs
+   d'interférence, portée radio du véhicule choisi).
 
-![Vue d'ensemble](images/carte.png)
+Ce manuel décrit la **version 3D** (branche `version-3d`). La version 2D seule est sur la branche
+`setup/squelette` : mêmes calculs, sans la vue 3D.
+
+![Vue 3D](images/vue3d.jpg)
 
 ## 2. Prérequis, outils et bibliothèques
 
@@ -39,14 +44,18 @@ leurs émissions radio se gênent s'ils utilisent le même canal. Le simulateur 
 | Compilateur | MinGW 13.1 (Windows) ; GCC, Clang ou MSVC conviennent | compilation |
 | CMake | 3.20 ou plus (3.16 suffit pour compiler ; `ctest --test-dir` demande 3.20) | description de la compilation (`CMakeLists.txt`) |
 | Ninja | 1.12 (facultatif) | compilation rapide |
-| Qt 6 | 6.8.3 | Widgets (interface, `QGraphicsView` pour la carte), Charts (courbes), Xml (`QXmlStreamReader` pour le `.osm`) |
+| Qt 6 | 6.8.3 | Widgets (interface, `QGraphicsView` pour la carte), Charts (courbes), Xml (`QXmlStreamReader` pour le `.osm`), OpenGL et OpenGLWidgets (vue 3D : `QOpenGLWidget`, shaders) |
+| OpenGL | 3.3 « core » | dessin de la vue 3D par la carte graphique (pilote de la carte graphique, rien à installer) |
 | Bibliothèque standard C++ | — | conteneurs, algorithmes, générateur aléatoire `std::mt19937` |
 | OpenStreetMap / Overpass API | — | données cartographiques (`data/telecharger_carte.py`) |
 | Git + GitHub | — | gestion du code |
 | Qt Creator ou VS Code | — | éditeurs utilisés par l'équipe |
 
-Machine : tout PC récent (le dessin se fait sur le processeur, sans carte graphique particulière). Mesuré sur un
-portable Windows 10 (écran à 125 %) : 2000 véhicules à 25 images/s avec les arêtes affichées.
+Machine : tout PC récent. La carte 2D est dessinée par le processeur ; la vue 3D demande une carte graphique
+compatible OpenGL 3.3 (tous les PC depuis 2012 environ, y compris les cartes intégrées Intel). Sur un portable à
+deux cartes graphiques, le programme demande au pilote la plus puissante (NVIDIA ou AMD). Mesuré sur un portable
+Windows 10 (écran à 125 %, Intel UHD + NVIDIA GTX 1650) : 2000 véhicules à 25 images/s avec les arêtes, en 2D
+comme en 3D.
 
 ## 3. Installation et lancement
 
@@ -89,7 +98,8 @@ Avec Qt Creator : *Fichier > Ouvrir un fichier ou projet* > `CMakeLists.txt`, ch
 build\v2v-simulator.exe
 ```
 
-- Sans argument, la carte `data/mulhouse.osm` du projet s'ouvre automatiquement.
+- Sans argument, la carte `data/mulhouse.osm` du projet s'ouvre automatiquement, avec ses bâtiments
+  (`data/mulhouse_batiments.txt`), en vue 3D.
 - Avec un argument, le fichier donné est ouvert : `v2v-simulator autre_ville.osm`.
 - Pour un lancement par double-clic sous Windows, copier une fois les bibliothèques de Qt à côté de l'exécutable :
   `C:\Qt\6.8.3\mingw_64\bin\windeployqt.exe --release build\v2v-simulator.exe`.
@@ -100,6 +110,11 @@ build\v2v-simulator.exe
 Modifier `ZONE = (sud, ouest, nord, est)` en degrés pour une autre ville. On peut aussi exporter une zone depuis
 openstreetmap.org (*Exporter*) : le lecteur ignore tout ce qui n'est pas une route carrossable.
 
+Les bâtiments de la vue 3D viennent de `data/telecharger_batiments.py` (même zone, même méthode). Le programme
+cherche, à côté de la carte `ville.osm`, un fichier `ville_batiments.txt` ; sans ce fichier, la vue 3D montre la
+ville sans bâtiments. Format (une ligne par bâtiment, coordonnées en millionièmes de degré, écarts entre points
+successifs) et règles d'estimation des hauteurs : voir l'en-tête du script.
+
 ## 4. Utilisation
 
 ### 4.1 La fenêtre principale
@@ -108,8 +123,8 @@ openstreetmap.org (*Exporter*) : le lecteur ignore tout ce qui n'est pas une rou
 
 | Zone | Contenu |
 |---|---|
-| Centre | la carte : routes (gris, plus foncé = plus importante), véhicules (pastille de la couleur de leur canal), arêtes d'interférence |
-| Haut | barre d'outils : ouvrir une carte, recentrer, zone, itinéraire, intersections, arêtes |
+| Centre | la vue 3D (au lancement) ou la carte 2D : routes (gris, plus foncé = plus importante), véhicules (couleur de leur canal), arêtes d'interférence |
+| Haut | barre d'outils : ouvrir une carte, carte 2D / vue 3D, recentrer, zone, itinéraire, intersections, arêtes |
 | Droite | panneau de contrôle : carte, zone, graphe routier, plus court chemin, simulation, graphe d'interférences, coloration, légende |
 | Bas | barre de contrôle du temps : démarrer/pause, ralentir, vitesse (×1...), accélérer, réinitialiser, temps simulé, images par seconde |
 | Barre d'état | messages, indicateurs de la coloration affichée (canaux, temps, stabilité, validité), coordonnées GPS sous la souris |
@@ -195,7 +210,37 @@ En Python : `pandas.read_csv("mesures.csv", sep=";", decimal=",")`.
 | Z | choisir la zone | Ctrl+R | réinitialiser |
 | Suppr | effacer la zone | E | arêtes d'interférence |
 | I | itinéraire | G | intersections |
-| Échap | annuler le tracé de zone | | |
+| 2 | carte 2D | 3 | vue 3D |
+| F | vue 3D : suivre le véhicule choisi | Échap | annuler le tracé de zone (2D), le choix du véhicule (3D) |
+
+### 4.10 Vue 3D
+
+![Véhicule choisi dans la vue 3D](images/vue3d_voisins.jpg)
+
+La vue 3D montre la même simulation que la carte 2D, en perspective :
+
+- **bâtiments** d'OpenStreetMap en volume (blanc « maquette »), routes en rubans gris au sol, grille de 100 m ;
+- **véhicules** en petites voitures tournées dans leur sens de marche, de la couleur de leur canal (même palette
+  que la carte 2D et la légende). Vue de loin, une voiture garde une taille minimale à l'écran pour rester visible ;
+- **arêtes d'interférence** (touche E) en arcs au-dessus des toits ;
+- **zone de simulation** : contour bleu au sol (elle se trace sur la carte 2D, touche Z).
+
+![Arêtes d'interférence en arcs au-dessus de la ville](images/vue3d_aretes.jpg)
+
+| Geste | Effet |
+|---|---|
+| Glisser (clic gauche) | déplacer : le point du sol saisi suit la souris |
+| Clic droit + glisser (ou Ctrl + clic gauche, ou molette enfoncée) | tourner autour du centre, incliner le regard |
+| Molette | zoom vers le point sous la souris |
+| Clic sur un véhicule | le choisir : bulle et disque de sa portée R, liens colorés vers ses voisins (les autres véhicules s'estompent), fiche en haut à gauche (numéro, canal, nombre de voisins, vitesse) |
+| Double-clic sur un véhicule, ou F | la caméra le suit ; glisser reprend la main |
+| Échap, ou clic dans le vide | annuler le choix |
+| R | vue d'ensemble de la carte (ou de la zone) |
+
+La boussole en haut à droite indique le nord. Quand la caméra descend dans les rues, les bâtiments situés entre
+elle et le point visé sont effacés (comme une maquette coupée) pour que le véhicule suivi reste visible.
+
+![Caméra qui suit un véhicule](images/vue3d_rue.jpg)
 
 ## 5. Architecture du code
 
@@ -210,7 +255,8 @@ Le code suit les cinq étapes du sujet ; chaque module est une petite bibliothè
 | Simulation (`src/simulation`) | `v2v-simulation` | `Simulation`, `Vehicule`, `ParametresSimulation` | graphe routier |
 | Interférences (`src/interference`) | `v2v-interference` | `GrapheInterference`, `StatsInterference` | Qt Core |
 | Coloration (`src/coloring`) | `v2v-coloration` | `Coloration::colorer`, `estValide`, `stabilite` | Qt Core |
-| Interface (`src/ui`, `src/map/MapView`) | application | `MainWindow`, `MoteurSimulation`, `FenetreComparaison`, `MapView` | tous, Qt Widgets, Charts |
+| Bâtiments (`src/vue3d/Batiments`) | `v2v-batiments` | `Batiments::charger`, `trianguler`, `construireMaillage` | carte |
+| Interface (`src/ui`, `src/map/MapView`, `src/vue3d/Vue3D`) | application | `MainWindow`, `MoteurSimulation`, `FenetreComparaison`, `MapView`, `Vue3D` | tous, Qt Widgets, Charts, OpenGL |
 
 Les modules de calcul n'utilisent pas Qt Widgets : ils peuvent tourner sans interface (tests, outil d'étude).
 
@@ -227,7 +273,8 @@ Le cahier des charges demande que la simulation et la coloration soient séparé
                                                    chaque seconde simulée :
                                                      GrapheInterference::construire
                                                      4 × Coloration::colorer
- MapView::afficherVehicules ◄── signal ─────────  nouvelInstantane (positions, couleurs, arêtes)
+ MapView::afficherVehicules ◄── signal ─────────  nouvelInstantane (positions, couleurs, caps,
+ Vue3D::afficherVehicules                           vitesses, arêtes)
  FenetreComparaison         ◄── signal ─────────  nouvelleMesure (k, temps, stabilité...)
 ```
 
@@ -248,6 +295,44 @@ carte, `OsmCarte::versMetres`). Pour rester fluide :
 - tous les véhicules et arêtes sont **un seul objet** (`CoucheVehicules`) ; chaque véhicule est la copie d'une
   petite image de pastille préparée une fois par couleur : ~1 ms pour 2000 véhicules au lieu de ~20 ms ;
 - seuls les éléments visibles à l'écran sont dessinés.
+
+### 5.4 Vue 3D (OpenGL)
+
+`Vue3D` est un `QOpenGLWidget` : le dessin est fait par la carte graphique, avec des **shaders** (petits
+programmes GLSL exécutés par la carte graphique, dans `src/vue3d/Shaders3D.h`). `MainWindow` place la carte 2D
+et la vue 3D dans une pile (`QStackedWidget`) et envoie les mêmes données aux deux ; seule la vue affichée se
+redessine. Repère 3D : x = est, y = hauteur, z = sud, en mètres ; un point (x, y) de la carte 2D est le point
+(x, 0, y) au sol.
+
+Ordre de dessin d'une image (`Vue3D::paintGL`) :
+
+1. **ciel et sol** : un triangle qui couvre l'écran ; pour chaque pixel, le shader calcule la direction du regard,
+   dessine le dégradé du ciel ou, vers le bas, le point du sol touché et la grille de 100 m ;
+2. **à plat sur le sol**, sans tampon de profondeur et dans l'ordre (petites rues, puis grandes routes, zone,
+   disque de portée) : deux surfaces à la même hauteur ne « clignotent » pas l'une à travers l'autre ;
+3. **objets en relief** avec le tampon de profondeur (un objet proche cache un objet lointain) : les bâtiments
+   (1,3 million de triangles envoyés une fois au chargement), puis toutes les voitures en **un seul appel**
+   (instanciation : la forme de voiture est envoyée une fois, puis à chaque image 8 nombres par véhicule :
+   position, cap, taille minimale, couleur) ;
+4. **transparents** : arcs des arêtes (un ruban de 16 morceaux par arête, épaisseur fixe en pixels calculée par
+   le shader, car OpenGL ne trace pas de lignes épaisses partout), bulle de portée ;
+5. **textes** (fiche du véhicule, aide, boussole) avec `QPainter` par-dessus l'image 3D.
+
+Autres choix :
+
+- **taille minimale à l'écran** : de loin, une rue de 6 m ou une voiture de 4,4 m ferait moins d'un pixel ; les
+  shaders les élargissent pour garder la même largeur à l'écran que sur la carte 2D ;
+- **brouillard** : les objets lointains prennent la couleur de l'horizon (profondeur, bord de carte invisible) ;
+- **éclairage** : soleil au sud-ouest ; la normale des murs est recalculée par pixel (`dFdx`, `dFdy`), ce qui évite
+  de la stocker pour chaque sommet ; pied des murs assombri pour ancrer les bâtiments au sol ;
+- **choix d'un véhicule** : au clic, la vue dessine une image jamais affichée où chaque voiture a une couleur qui
+  code son numéro, avec les bâtiments devant elle ; la couleur lue sous la souris (à 14 pixels près) donne la
+  voiture visible, jamais une voiture cachée derrière un bâtiment ou une autre voiture. Ses voisins sont lus
+  dans la liste des arêtes ;
+- **maquette coupée** : près du sol, les bâtiments situés dans un couloir entre la caméra et le point visé sont
+  effacés par le shader ; le point visé (le véhicule suivi) reste toujours visible ;
+- **compatibilité** : OpenGL 3.3 « core » (fonctionne sous Windows, Linux et macOS) ; le format est réglé dans
+  `main.cpp` avant la création de l'application, comme l'exige macOS.
 
 ## 6. Algorithmes
 
@@ -301,6 +386,19 @@ qu'avec les 9 cases autour. Mesuré : ~1,5 ms pour 2000 véhicules contre ~4 ms 
 
 Les résultats chiffrés et leur analyse sont dans l'[étude comparative](etude.md).
 
+### 6.6 Bâtiments en volume
+
+- **Lecture** : le fichier compact est lu en une fois et parcouru caractère par caractère (sans découpage en
+  mots, 1,1 million de nombres) ; chaque point est converti en mètres par `OsmCarte::versMetres`, la même
+  projection que les routes. 73 878 bâtiments en ~45 ms.
+- **Murs** : pour un contour de n points, n points au sol et n au niveau du toit, et deux triangles par côté.
+- **Toit** : le contour (souvent non convexe : en L, en U...) est découpé en triangles par la méthode des
+  **oreilles** (*ear clipping*) : on cherche un coin convexe dont le triangle ne contient aucun autre point du
+  contour, on le retire en gardant ce triangle, et on recommence. Le signe de l'aire du contour donne son sens
+  de parcours, donc quels coins sont convexes. Points alignés : retirés sans triangle. 99,9 % des toits sont
+  complets (les autres contours se croisent eux-mêmes dans OSM).
+- Total : 1,3 million de triangles construits en ~55 ms au chargement.
+
 ## 7. Tests et performances
 
 ```bash
@@ -314,9 +412,15 @@ ctest --test-dir build --output-on-failure
 | `test_simulation` | distance parcourue = vitesse × temps, positions toujours sur une route, arrivées, reproductibilité, grands pas |
 | `test_interference` | grille = toutes les paires (positions et portées aléatoires, coordonnées négatives, bords de cases) |
 | `test_coloring` | graphes connus (K5, cycles pair/impair, K3,3, étoile, Petersen, couronne), biparti aléatoire (DSATUR exact), validité, stabilité, déterminisme |
+| `test_batiments` | lecture (commentaires, fins de ligne Windows, lignes invalides), découpage des toits (carré, L, U, points alignés ou répétés, 1000 polygones en étoile : surface conservée, aucun triangle retourné), volumes (nombre de sommets et de triangles, hauteurs) |
 
-Certains tests acceptent un fichier `.osm` en argument pour mesurer les performances sur la vraie carte :
-`build\test_road_graph.exe data\mulhouse.osm`, `build\test_simulation.exe data\mulhouse.osm`.
+Certains tests acceptent un fichier `.osm` (ou le dossier `data`) en argument pour mesurer les performances sur la
+vraie carte : `build\test_road_graph.exe data\mulhouse.osm`, `build\test_simulation.exe data\mulhouse.osm`,
+`build\test_batiments.exe data`.
+
+L'interface (2D et 3D) est vérifiée par un programme de test qui crée la fenêtre sans l'afficher et lui envoie des
+clics, des glissers, des crans de molette et des touches : choix et suivi d'un véhicule, rotation, passage 2D/3D,
+zone, relance à 5000 véhicules, cadrage de la carte 2D.
 
 Performances mesurées (Mulhouse, Release) :
 
@@ -329,6 +433,12 @@ Performances mesurées (Mulhouse, Release) :
 | Coloration (Glouton / Welsh–Powell / DSATUR / recherche locale) | ~0,1 / 0,25 / 2,3 / 5,7 ms |
 | Une image affichée, 2000 véhicules + arêtes | ~10 ms (25 images/s) |
 | 5000 véhicules | 25 images/s (22 avec les arêtes) |
+| Lecture des bâtiments + construction des volumes | ~100 ms |
+| Une image 3D, vue d'ensemble, 2000 véhicules + bâtiments (NVIDIA GTX 1650 / Intel UHD) | ~7 ms / ~14 ms |
+| Une image 3D, 5000 véhicules + arêtes (NVIDIA GTX 1650 / Intel UHD) | ~9 ms / ~22 ms |
+
+Les temps 3D comprennent la lecture de l'image par le programme de test (quelques ms) : même la carte intégrée
+reste sous les 40 ms d'une image à 25 images/s.
 
 ## 8. Guide du développeur
 
@@ -369,3 +479,7 @@ Performances mesurées (Mulhouse, Release) :
   utilisent toujours le graphe complet.
 - La stabilité compare les numéros de canaux tels quels : deux colorations identiques à un renommage près des
   couleurs comptent comme différentes (c'est la définition du sujet).
+- Vue 3D : environ 90 % des bâtiments n'ont pas de hauteur dans OpenStreetMap ; elle est estimée (type de
+  bâtiment, surface au sol). Les cours intérieures des grands bâtiments « multipolygones » sont remplies. Toits
+  plats, pas d'ombres portées, pas de relief du terrain. Les bâtiments n'arrêtent pas les ondes radio (comme en 2D,
+  la portée est un simple cercle de rayon R).
