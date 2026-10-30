@@ -492,6 +492,15 @@ void Vue3D::setRayon(double rayon)
     update();
 }
 
+void Vue3D::setInvite(const QString &titre, const QString &detail)
+{
+    if (titre == m_inviteTitre && detail == m_inviteDetail)
+        return;
+    m_inviteTitre = titre;
+    m_inviteDetail = detail;
+    update();
+}
+
 // ---------------------------------------------------------------------------
 // Caméra
 // ---------------------------------------------------------------------------
@@ -982,15 +991,21 @@ void Vue3D::dessinerTextes()
         return;
     }
 
-    // Aide en bas à gauche.
+    // Aide en bas à gauche ; dans une vue étroite, elle passe à la ligne au lieu d'être coupée.
     const QString aide = "Glisser : déplacer  ·  Clic droit + glisser : tourner  ·  Molette : zoom  ·  "
                          "Clic sur un véhicule : ses voisins";
     const QFontMetricsF mesure(font());
-    const QRectF zoneAide(12, height() - 12 - mesure.height() - 12, mesure.horizontalAdvance(aide) + 24,
-                          mesure.height() + 12);
+    const int drapeauxAide = Qt::AlignCenter | Qt::TextWordWrap;
+    const double largeurAide = std::max(40.0, std::min(mesure.horizontalAdvance(aide) + 1.0, width() - 48.0));
+    const double hauteurAide = mesure.boundingRect(QRectF(0, 0, largeurAide, 1e6), drapeauxAide, aide).height();
+    const QRectF zoneAide(12, height() - 12 - hauteurAide - 12, largeurAide + 24, hauteurAide + 12);
     cartouche(zoneAide);
     p.setPen(QColor(0x37, 0x41, 0x51));
-    p.drawText(zoneAide, Qt::AlignCenter, aide);
+    p.drawText(zoneAide.adjusted(12, 6, -12, -6), drapeauxAide, aide);
+
+    // Message d'accueil (simulation pas encore démarrée), même dessin que la carte 2D.
+    if (!m_inviteTitre.isEmpty())
+        MapView::dessinerInvite(p, rect(), m_inviteTitre, m_inviteDetail, font());
 
     // Boussole en haut à droite : la flèche rouge montre le nord à l'écran.
     const QPointF centre(width() - 44.0, 44.0);

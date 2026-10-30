@@ -124,10 +124,17 @@ successifs) et règles d'estimation des hauteurs : voir l'en-tête du script.
 | Zone | Contenu |
 |---|---|
 | Centre | la vue 3D (au lancement) ou la carte 2D : routes (gris, plus foncé = plus importante), véhicules (couleur de leur canal), arêtes d'interférence |
-| Haut | barre d'outils : ouvrir une carte, carte 2D / vue 3D, recentrer, zone, itinéraire, intersections, arêtes |
-| Droite | panneau de contrôle : carte, zone, graphe routier, plus court chemin, simulation, graphe d'interférences, coloration, légende |
+| Haut | barre d'outils : ouvrir une carte, carte 2D / vue 3D, recentrer, arêtes, comparaison ; en carte 2D seulement, une deuxième barre pour les outils qui se manient à la souris sur la carte : zone, effacer la zone, itinéraire, intersections |
+| Droite | panneau de contrôle en 3 onglets : **Simulation** (réglages, état, graphe d'interférences), **Coloration** (tableau des 4 algorithmes, canaux utilisés, comparaison, export), **Carte** (carte chargée, zone, graphe routier, plus court chemin, légende des routes) ; en dessous, les gestes de souris de la vue affichée |
 | Bas | barre de contrôle du temps : démarrer/pause, ralentir, vitesse (×1...), accélérer, réinitialiser, temps simulé, images par seconde |
 | Barre d'état | messages, indicateurs de la coloration affichée (canaux, temps, stabilité, validité), coordonnées GPS sous la souris |
+
+Tant que la simulation n'a pas été démarrée (au lancement, après *Appliquer et relancer* ou *Réinitialiser*), un
+message au centre de la vue rappelle d'appuyer sur Espace. *Affichage > Thème sombre* (**Ctrl+T**) passe
+l'interface en couleurs sombres ; les cartes 2D et 3D gardent leurs couleurs, choisies pour que les canaux restent
+lisibles.
+
+![Thème sombre, onglet Coloration](images/interface_sombre.jpg)
 
 ### 4.2 Se déplacer sur la carte
 
@@ -179,13 +186,15 @@ destination et une portée radio. À l'arrivée, il reçoit une nouvelle destina
 
 ### 4.7 Coloration et comparaison (étape 5)
 
-- À chaque recalcul, les **quatre** algorithmes colorent le même graphe. *Couleurs affichées* choisit celui
-  dont les couleurs apparaissent sur la carte (et dans la barre d'état).
-- Le panneau *Coloration* donne pour chacun : nombre de canaux, temps, stabilité, validité (vérifiée
-  automatiquement : « valide » = aucune arête entre deux véhicules de même canal).
-- La rangée de pastilles montre les canaux utilisés.
-- *Comparaison…* (ou menu *Simulation*) ouvre la fenêtre de comparaison : tableau des moyennes et maximums,
-  courbes k(t), temps de calcul et S(t).
+- À chaque recalcul, les **quatre** algorithmes colorent le même graphe. *Couleurs affichées* (onglet
+  *Coloration*) choisit celui dont les couleurs apparaissent sur la carte (et dans la barre d'état).
+- Le tableau de l'onglet *Coloration* donne pour chacun, au dernier recalcul : nombre de canaux, temps de calcul
+  (ms), stabilité S et validité (✓ vert = aucune arête entre deux véhicules de même canal, vérifié
+  automatiquement ; ✗ rouge avec le nombre de conflits sinon). Le plus petit nombre de canaux est en gras.
+  Cliquer une ligne affiche les couleurs de cet algorithme sur la carte.
+- Les pastilles sous le tableau montrent les canaux utilisés (12 par ligne).
+- *Comparaison* (barre d'outils, onglet *Coloration* ou menu *Simulation*) ouvre la fenêtre de comparaison :
+  tableau des moyennes et maximums, courbes k(t), temps de calcul et S(t).
 
 ![Fenêtre de comparaison](images/comparaison.png)
 
@@ -212,6 +221,7 @@ En Python : `pandas.read_csv("mesures.csv", sep=";", decimal=",")`.
 | I | itinéraire | G | intersections |
 | 2 | carte 2D | 3 | vue 3D |
 | F | vue 3D : suivre le véhicule choisi | Échap | annuler le tracé de zone (2D), le choix du véhicule (3D) |
+| Ctrl+T | thème clair / sombre | | |
 
 ### 4.10 Vue 3D
 
@@ -256,7 +266,7 @@ Le code suit les cinq étapes du sujet ; chaque module est une petite bibliothè
 | Interférences (`src/interference`) | `v2v-interference` | `GrapheInterference`, `StatsInterference` | Qt Core |
 | Coloration (`src/coloring`) | `v2v-coloration` | `Coloration::colorer`, `estValide`, `stabilite` | Qt Core |
 | Bâtiments (`src/vue3d/Batiments`) | `v2v-batiments` | `Batiments::charger`, `trianguler`, `construireMaillage` | carte |
-| Interface (`src/ui`, `src/map/MapView`, `src/vue3d/Vue3D`) | application | `MainWindow`, `MoteurSimulation`, `FenetreComparaison`, `MapView`, `Vue3D` | tous, Qt Widgets, Charts, OpenGL |
+| Interface (`src/ui`, `src/map/MapView`, `src/vue3d/Vue3D`) | application | `MainWindow`, `MoteurSimulation`, `FenetreComparaison`, `Theme` (style, thème clair/sombre, icônes), `MapView`, `Vue3D` | tous, Qt Widgets, Charts, OpenGL |
 
 Les modules de calcul n'utilisent pas Qt Widgets : ils peuvent tourner sans interface (tests, outil d'étude).
 

@@ -17,7 +17,10 @@ class QDoubleSpinBox;
 class QLabel;
 class QSpinBox;
 class QStackedWidget;
+class QTabWidget;
+class QTableWidget;
 class QThread;
+class QToolBar;
 class Vue3D;
 
 /// Fenêtre principale du simulateur (disposition décrite dans le cahier des charges, §5) :
@@ -47,6 +50,9 @@ private:
     QWidget *creerPanneau();   // construit le panneau de contrôle de droite
     void creerBarreTemps();    // construit la barre du bas (contrôle du temps)
     void afficherVue3D(bool vue3d);  // bascule entre la carte 2D et la vue 3D
+    void majInvite();                // message d'accueil au centre des vues, avant le premier démarrage
+    void majIcones();                // (re)dessine les icônes dans la couleur du thème
+    void changerTheme(bool sombre);  // thème clair ou sombre de l'interface
 
     // ---- Simulation (étapes 3 à 5) ----
     void lancerSimulation();   // (re)crée la simulation sur le graphe actuel avec les réglages du panneau
@@ -68,6 +74,7 @@ private:
     FenetreComparaison *m_comparaison = nullptr;
     int m_generation = 0;      // numéro de la simulation en cours : les messages d'une ancienne sont ignorés
     int m_indiceFacteur = 2;   // indice dans la liste des facteurs de temps (2 = ×1)
+    bool m_attendDemarrage = false;  // simulation prête mais jamais démarrée : message d'accueil
     QElapsedTimer m_chronoImages;  // pour mesurer les images par seconde affichées
     int m_images = 0;
 
@@ -77,8 +84,10 @@ private:
     QLabel *m_infosItineraire = nullptr;
     QLabel *m_infosSimulation = nullptr;
     QLabel *m_infosInterference = nullptr;
-    QLabel *m_infosColoration = nullptr;
+    QTableWidget *m_tableauColoration = nullptr;  // résultats des 4 algorithmes au dernier recalcul
     QLabel *m_legendeCanaux = nullptr;
+    QTabWidget *m_onglets = nullptr;              // panneau de droite : Simulation, Coloration, Carte
+    QToolBar *m_barre2D = nullptr;                // outils de la carte 2D (cachés en 3D)
     QLabel *m_coordonnees = nullptr;
     QLabel *m_indicateurs = nullptr;  // barre d'état : indicateurs de la coloration en cours
     QLabel *m_tempsSimule = nullptr;
@@ -92,6 +101,9 @@ private:
     QSpinBox *m_graine = nullptr;
     QComboBox *m_algoAffiche = nullptr;
 
+    QAction *m_actionOuvrir = nullptr;
+    QAction *m_actionComparaison = nullptr;  // fenêtre de comparaison des algorithmes
+    QAction *m_actionThemeSombre = nullptr;  // menu Affichage
     QAction *m_action2D = nullptr;           // afficher la carte 2D (touche 2)
     QAction *m_action3D = nullptr;           // afficher la vue 3D (touche 3)
     QAction *m_actionRecentrer = nullptr;

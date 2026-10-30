@@ -43,6 +43,10 @@ La même simulation en carte 2D (touche **2**) et la fenêtre de comparaison des
 
 ![Fenêtre de comparaison des algorithmes](docs/images/comparaison.png)
 
+Thème sombre (**Ctrl+T**), onglet *Coloration* du panneau : le tableau compare les 4 algorithmes au dernier recalcul.
+
+![Thème sombre et tableau des résultats de coloration](docs/images/interface_sombre.jpg)
+
 ## Prérequis
 
 - Un compilateur **C++17** : MinGW 13 (fourni avec Qt sous Windows), GCC, Clang ou MSVC
@@ -98,9 +102,11 @@ C:\Qt\6.8.3\mingw_64\bin\windeployqt.exe --release build\v2v-simulator.exe
 3. Vue 3D : glisser = déplacer ; clic droit + glisser = tourner et incliner ; molette = zoom ;
    clic sur un véhicule = sa portée et ses voisins ; double-clic (ou **F**) = le suivre ; **Échap** = annuler.
 4. **Z** puis clic-glisser : choisir une zone de simulation (sur la carte 2D). **Suppr** : revenir à toute la carte.
-5. Panneau de droite : nombre de véhicules, portée R, intervalle de recalcul, graine, algorithme dont les couleurs sont affichées.
+5. Panneau de droite, en 3 onglets : **Simulation** (nombre de véhicules, portée R, intervalle de recalcul, graine),
+   **Coloration** (tableau des 4 algorithmes ; cliquer une ligne affiche ses couleurs), **Carte** (zone, graphe, itinéraire).
 6. **E** : afficher les arêtes d'interférence. **G** : afficher les intersections. **I** : tester un plus court chemin.
-7. **Simulation > Comparaison des algorithmes…** : tableau et courbes ; **Exporter CSV…** pour les mesures.
+7. **Comparaison** : tableau et courbes des 4 algorithmes ; **Exporter CSV…** pour les mesures.
+8. **Ctrl+T** (menu Affichage) : thème sombre.
 
 Le détail est dans le [manuel utilisateur et développeur](docs/manuel.md).
 

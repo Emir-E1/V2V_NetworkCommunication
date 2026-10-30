@@ -73,6 +73,9 @@ public:
     void setRayon(double rayon);
     /// Caméra en vue d'ensemble de la carte (ou de la zone de simulation si elle existe).
     void recentrer();
+    /// Message d'accueil au centre de la vue (« Appuyez sur Espace... ») ; titre vide = aucun.
+    void setInvite(const QString &titre, const QString &detail);
+    const QString &invite() const { return m_inviteTitre; }
 
     /// Véhicule choisi (-1 = aucun) et suivi par la caméra (utile aux tests).
     int vehiculeChoisi() const { return m_choisi; }
@@ -157,6 +160,7 @@ private:
     QVector<QPair<int, int>> m_aretes;
     bool m_aretesVisibles = false;
     double m_rayon = 300.0;
+    QString m_inviteTitre, m_inviteDetail;  ///< message d'accueil (voir setInvite)
     QRectF m_limitesCarte;  ///< rectangle de la carte, en mètres
     QRectF m_zone;          ///< zone de simulation (vide = toute la carte)
     double m_latRef = 0.0, m_lonRef = 0.0;  ///< centre de la projection, pour mètres -> GPS

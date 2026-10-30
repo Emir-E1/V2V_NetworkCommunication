@@ -47,6 +47,9 @@ public:
     /// fenêtre et par celui du panneau principal.
     void exporterAvecDialogue(QWidget *parent);
 
+    /// Courbes sur fond sombre ou clair, pour suivre le thème de l'interface.
+    void setThemeSombre(bool sombre);
+
 protected:
     void showEvent(QShowEvent *event) override;
 

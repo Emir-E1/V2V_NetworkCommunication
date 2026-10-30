@@ -77,6 +77,13 @@ public:
     // Couleur d'un canal radio : palette de couleurs bien distinctes, partagée avec la légende.
     static QColor couleurCanal(int canal);
 
+    // Message d'accueil au centre de la carte (« Appuyez sur Espace... ») ; titre vide = aucun.
+    void setInvite(const QString &titre, const QString &detail);
+    const QString &invite() const { return m_inviteTitre; }
+    // Dessine ce message dans un cartouche centré dans `zone` (en pixels) : partagé avec la vue 3D.
+    static void dessinerInvite(QPainter &p, const QRectF &zone, const QString &titre, const QString &detail,
+                               const QFont &police);
+
 signals:
     // Simple clic sur la carte en mode itinéraire (position en mètres).
     void clicCarte(const QPointF &pos);
@@ -128,4 +135,6 @@ private:
     // Véhicules et arêtes : un seul objet graphique (voir CoucheVehicules dans MapView.cpp).
     class CoucheVehicules *m_vehicules = nullptr;
     bool m_aretesVisibles = false;
+
+    QString m_inviteTitre, m_inviteDetail;  // message d'accueil (voir setInvite)
 };

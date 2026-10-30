@@ -710,5 +710,58 @@ void MapView::drawForeground(QPainter *painter, const QRectF &)
     painter->drawLine(bas + QPointF(largeur, 0.0), bas + QPointF(largeur, -6.0));           // graduation droite
     painter->drawText(QRectF(bas.x(), bas.y() - 26.0, largeur, 18.0), Qt::AlignCenter, texte);
 
+    if (!m_inviteTitre.isEmpty())
+        dessinerInvite(*painter, viewport()->rect(), m_inviteTitre, m_inviteDetail, font());
     painter->restore();
+}
+
+void MapView::setInvite(const QString &titre, const QString &detail)
+{
+    if (titre == m_inviteTitre && detail == m_inviteDetail)
+        return;
+    m_inviteTitre = titre;
+    m_inviteDetail = detail;
+    viewport()->update();
+}
+
+void MapView::dessinerInvite(QPainter &p, const QRectF &zone, const QString &titre, const QString &detail,
+                             const QFont &police)
+{
+    // Titre en grand et en gras, détail en dessous, dans un cartouche blanc arrondi avec une
+    // légère ombre, un peu au-dessus du centre (le centre de la carte reste visible).
+    // Fenêtre étroite : le cartouche ne dépasse jamais la vue, les textes passent à la ligne.
+    QFont grande = police;
+    if (police.pointSizeF() > 0)
+        grande.setPointSizeF(police.pointSizeF() * 1.35);
+    else
+        grande.setPixelSize(qRound(police.pixelSize() * 1.35));
+    grande.setBold(true);
+    const QFontMetricsF mesureTitre(grande), mesureDetail(police);
+    constexpr double marge = 16.0, interieur = 24.0, haut = 16.0, entre = 6.0;
+    const double largeurTexte = std::max(
+        40.0, std::min(std::max(mesureTitre.horizontalAdvance(titre), mesureDetail.horizontalAdvance(detail)),
+                       zone.width() - 2.0 * (marge + interieur)));
+    const int drapeaux = Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap;
+    const double hauteurTitre = mesureTitre.boundingRect(QRectF(0, 0, largeurTexte, 1e6), drapeaux, titre).height();
+    const double hauteurDetail = mesureDetail.boundingRect(QRectF(0, 0, largeurTexte, 1e6), drapeaux, detail).height();
+    const double largeur = largeurTexte + 2.0 * interieur;
+    const double hauteur = haut + hauteurTitre + entre + hauteurDetail + haut;
+    const QRectF cadre(zone.center().x() - largeur / 2.0, zone.top() + zone.height() * 0.38 - hauteur / 2.0, largeur,
+                       hauteur);
+
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0, 0, 0, 28));
+    p.drawRoundedRect(cadre.translated(0.0, 3.0), 12.0, 12.0);  // ombre
+    p.setBrush(QColor(255, 255, 255, 242));
+    p.drawRoundedRect(cadre, 12.0, 12.0);
+    p.setFont(grande);
+    p.setPen(QColor(0x1F, 0x29, 0x37));
+    p.drawText(QRectF(cadre.left() + interieur, cadre.top() + haut, largeurTexte, hauteurTitre), drapeaux, titre);
+    p.setFont(police);
+    p.setPen(QColor(0x4B, 0x55, 0x63));
+    p.drawText(QRectF(cadre.left() + interieur, cadre.top() + haut + hauteurTitre + entre, largeurTexte, hauteurDetail),
+               drapeaux, detail);
+    p.restore();
 }
