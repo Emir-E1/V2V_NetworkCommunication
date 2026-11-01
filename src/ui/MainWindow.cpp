@@ -156,9 +156,6 @@ MainWindow::MainWindow(QWidget *parent)
         statusBar()->showMessage(enMarche ? "Simulation en marche" : "Simulation en pause");
         if (!enMarche)
             m_imagesParSeconde->setText("en pause");
-        if (enMarche)
-            m_attendDemarrage = false;  // le message d'accueil a rempli son rôle
-        majInvite();
     });
 
     m_actionRalentir = new QAction("Ralentir", this);
@@ -180,8 +177,6 @@ MainWindow::MainWindow(QWidget *parent)
         const int generation = ++m_generation;
         QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, generation] { moteur->reinitialiser(generation); },
                                   Qt::QueuedConnection);
-        m_attendDemarrage = true;
-        majInvite();
     });
 
     // Fenêtre de comparaison des algorithmes (étape 5) : barre d'outils, menu et panneau.
@@ -287,15 +282,6 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     m_aide->setText("Molette : zoom · Clic-glisser : déplacer · Z : tracer la zone de simulation");
-}
-
-void MainWindow::majInvite()
-{
-    // Message d'accueil au centre de la vue, tant qu'une simulation prête n'a pas encore été
-    // lancée : sans lui, on arrive sur des véhicules immobiles sans savoir quoi faire.
-    const bool afficher = m_attendDemarrage && m_actionLecture->isEnabled() && !m_actionLecture->isChecked();
-    const QString titre = afficher ? QString("Appuyez sur Espace pour démarrer la simulation") : QString();
-    m_vue->setInvite(titre, "Molette : zoom · Glisser : déplacer · Z : choisir une zone de simulation");
 }
 
 void MainWindow::majIcones()
@@ -754,8 +740,6 @@ void MainWindow::lancerSimulation()
         Qt::QueuedConnection);
     if (!grapheVide)
         statusBar()->showMessage("Simulation prête : appuyez sur « Démarrer » (Espace)");
-    m_attendDemarrage = true;
-    majInvite();
 }
 
 void MainWindow::recevoirInstantane(const Instantane &instantane)

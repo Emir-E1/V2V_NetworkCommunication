@@ -46,7 +46,6 @@ private:
     void clicItineraire(const QPointF &pos);  // 1er clic = départ A, 2e clic = arrivée B
     QWidget *creerPanneau();   // construit le panneau de contrôle de droite
     void creerBarreTemps();    // construit la barre du bas (contrôle du temps)
-    void majInvite();                // message d'accueil au centre de la carte, avant le premier démarrage
     void majIcones();                // (re)dessine les icônes dans la couleur du thème
     void changerTheme(bool sombre);  // thème clair ou sombre de l'interface
 
@@ -68,7 +67,6 @@ private:
     FenetreComparaison *m_comparaison = nullptr;
     int m_generation = 0;      // numéro de la simulation en cours : les messages d'une ancienne sont ignorés
     int m_indiceFacteur = 2;   // indice dans la liste des facteurs de temps (2 = ×1)
-    bool m_attendDemarrage = false;  // simulation prête mais jamais démarrée : message d'accueil
     QElapsedTimer m_chronoImages;  // pour mesurer les images par seconde affichées
     int m_images = 0;
 
