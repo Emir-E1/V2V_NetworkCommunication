@@ -16,7 +16,10 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QSpinBox;
+class QTabWidget;
+class QTableWidget;
 class QThread;
+class QToolBar;
 
 /// Fenêtre principale du simulateur (disposition décrite dans le cahier des charges, §5) :
 ///   - au centre : la carte (MapView) avec les routes, les véhicules colorés et les arêtes
@@ -43,6 +46,9 @@ private:
     void clicItineraire(const QPointF &pos);  // 1er clic = départ A, 2e clic = arrivée B
     QWidget *creerPanneau();   // construit le panneau de contrôle de droite
     void creerBarreTemps();    // construit la barre du bas (contrôle du temps)
+    void majInvite();                // message d'accueil au centre de la carte, avant le premier démarrage
+    void majIcones();                // (re)dessine les icônes dans la couleur du thème
+    void changerTheme(bool sombre);  // thème clair ou sombre de l'interface
 
     // ---- Simulation (étapes 3 à 5) ----
     void lancerSimulation();   // (re)crée la simulation sur le graphe actuel avec les réglages du panneau
@@ -62,6 +68,7 @@ private:
     FenetreComparaison *m_comparaison = nullptr;
     int m_generation = 0;      // numéro de la simulation en cours : les messages d'une ancienne sont ignorés
     int m_indiceFacteur = 2;   // indice dans la liste des facteurs de temps (2 = ×1)
+    bool m_attendDemarrage = false;  // simulation prête mais jamais démarrée : message d'accueil
     QElapsedTimer m_chronoImages;  // pour mesurer les images par seconde affichées
     int m_images = 0;
 
@@ -71,13 +78,15 @@ private:
     QLabel *m_infosItineraire = nullptr;
     QLabel *m_infosSimulation = nullptr;
     QLabel *m_infosInterference = nullptr;
-    QLabel *m_infosColoration = nullptr;
+    QTableWidget *m_tableauColoration = nullptr;  // résultats des 4 algorithmes au dernier recalcul
     QLabel *m_legendeCanaux = nullptr;
+    QTabWidget *m_onglets = nullptr;              // panneau de droite : Simulation, Coloration, Carte
     QLabel *m_coordonnees = nullptr;
     QLabel *m_indicateurs = nullptr;  // barre d'état : indicateurs de la coloration en cours
     QLabel *m_tempsSimule = nullptr;
     QLabel *m_facteurTemps = nullptr;
     QLabel *m_imagesParSeconde = nullptr;
+    QLabel *m_aide = nullptr;         // rappel des gestes de souris sous les onglets
 
     QSpinBox *m_nombreVehicules = nullptr;
     QDoubleSpinBox *m_rayon = nullptr;
@@ -85,6 +94,9 @@ private:
     QSpinBox *m_graine = nullptr;
     QComboBox *m_algoAffiche = nullptr;
 
+    QAction *m_actionOuvrir = nullptr;
+    QAction *m_actionComparaison = nullptr;  // fenêtre de comparaison des algorithmes
+    QAction *m_actionThemeSombre = nullptr;  // menu Affichage
     QAction *m_actionRecentrer = nullptr;
     QAction *m_actionZone = nullptr;
     QAction *m_actionEffacerZone = nullptr;

@@ -8,7 +8,7 @@ Quatre algorithmes sont comparés en direct : Glouton, Welsh–Powell, DSATUR et
 > Master 1 Informatique et Mobilité — UE Réseaux Mobiles, Université de Haute-Alsace, automne 2026.
 > Encadrant : Laurent Moalic.
 
-![Simulation de 2000 véhicules colorés par DSATUR, arêtes d'interférence affichées](docs/images/simulation.png)
+![Fenêtre principale : 2000 véhicules colorés par canal, panneau en onglets](docs/images/simulation.png)
 
 ## Fonctionnalités
 
@@ -73,9 +73,11 @@ C:\Qt\6.8.3\mingw_64\bin\windeployqt.exe --release build\v2v-simulator.exe
 
 1. **Espace** : démarrer / mettre en pause. **+** / **-** : accélérer / ralentir (×0,25 à ×32).
 2. **Z** puis clic-glisser : choisir une zone de simulation. **Suppr** : revenir à toute la carte.
-3. Panneau de droite : nombre de véhicules, portée R, intervalle de recalcul, graine, algorithme dont les couleurs sont affichées.
+3. Panneau de droite, en 3 onglets : **Simulation** (nombre de véhicules, portée R, intervalle de recalcul, graine),
+   **Coloration** (tableau des 4 algorithmes ; cliquer une ligne affiche ses couleurs), **Carte** (zone, graphe routier, itinéraire).
 4. **E** : afficher les arêtes d'interférence. **G** : afficher les intersections. **I** : tester un plus court chemin.
-5. **Simulation > Comparaison des algorithmes…** : tableau et courbes ; **Exporter CSV…** pour les mesures.
+5. **Comparaison** (barre d'outils) : tableau et courbes ; **Exporter CSV…** pour les mesures.
+6. **Ctrl+T** : thème sombre.
 
 Le détail est dans le [manuel utilisateur et développeur](docs/manuel.md).
 
@@ -118,7 +120,7 @@ src/
   simulation/    déplacement des véhicules (Simulation)
   interference/  graphe d'interférences avec grille spatiale (InterferenceGraph)
   coloring/      Glouton, Welsh-Powell, DSATUR, recherche locale (Coloring)
-  ui/            fenêtre principale, moteur de simulation (fil séparé), fenêtre de comparaison
+  ui/            fenêtre principale, moteur de simulation (fil séparé), fenêtre de comparaison, thème et icônes
 tests/           un test automatique par module (ctest)
 outils/          etude_coloration : étude comparative en ligne de commande
 data/            mulhouse.osm et le script qui le télécharge

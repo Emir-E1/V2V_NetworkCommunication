@@ -6,9 +6,13 @@
 #include "map/MapView.h"
 #include "map/OsmLoader.h"
 #include "ui/FenetreComparaison.h"
+#include "ui/Theme.h"
 
 #include <QAction>
 #include <QApplication>
+#include <QHeaderView>
+#include <QTabWidget>
+#include <QTableWidget>
 #include <QComboBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
@@ -26,6 +30,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPainter>
+#include <QtMath>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QStatusBar>
@@ -34,6 +39,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <limits>
 
 // Dossier data/ du projet, fourni par CMake (voir CMakeLists.txt).
 #ifndef V2V_DOSSIER_DONNEES
@@ -70,10 +76,11 @@ MainWindow::MainWindow(QWidget *parent)
     m_comparaison = new FenetreComparaison(this);
 
     // ---- Actions : une action = une commande, réutilisable dans le menu ET la barre d'outils ----
-    auto *actionOuvrir = new QAction("Ouvrir une carte…", this);
-    actionOuvrir->setShortcut(QKeySequence::Open);  // Ctrl+O
-    actionOuvrir->setToolTip("Ouvrir un fichier OpenStreetMap (.osm) — Ctrl+O");
-    connect(actionOuvrir, &QAction::triggered, this, &MainWindow::ouvrirCarte);
+    // (leurs icônes sont posées par majIcones(), qui les redessine quand le thème change)
+    m_actionOuvrir = new QAction("Ouvrir une carte…", this);
+    m_actionOuvrir->setShortcut(QKeySequence::Open);  // Ctrl+O
+    m_actionOuvrir->setToolTip("Ouvrir un fichier OpenStreetMap (.osm) — Ctrl+O");
+    connect(m_actionOuvrir, &QAction::triggered, this, &MainWindow::ouvrirCarte);
 
     m_actionRecentrer = new QAction("Recentrer", this);
     m_actionRecentrer->setShortcut(Qt::Key_R);
@@ -141,6 +148,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_actionLecture->setToolTip("Démarrer / mettre en pause la simulation — Espace");
     connect(m_actionLecture, &QAction::toggled, this, [this](bool enMarche) {
         m_actionLecture->setText(enMarche ? "Pause" : "Démarrer");
+        m_actionLecture->setIcon(Theme::icone(enMarche ? Theme::Icone::Pause : Theme::Icone::Lecture));
         QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, enMarche] { moteur->setEnMarche(enMarche); },
                                   Qt::QueuedConnection);
         m_images = 0;
@@ -148,6 +156,9 @@ MainWindow::MainWindow(QWidget *parent)
         statusBar()->showMessage(enMarche ? "Simulation en marche" : "Simulation en pause");
         if (!enMarche)
             m_imagesParSeconde->setText("en pause");
+        if (enMarche)
+            m_attendDemarrage = false;  // le message d'accueil a rempli son rôle
+        majInvite();
     });
 
     m_actionRalentir = new QAction("Ralentir", this);
@@ -169,7 +180,25 @@ MainWindow::MainWindow(QWidget *parent)
         const int generation = ++m_generation;
         QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, generation] { moteur->reinitialiser(generation); },
                                   Qt::QueuedConnection);
+        m_attendDemarrage = true;
+        majInvite();
     });
+
+    // Fenêtre de comparaison des algorithmes (étape 5) : barre d'outils, menu et panneau.
+    m_actionComparaison = new QAction("Comparaison", this);
+    m_actionComparaison->setToolTip("Tableau et courbes des 4 algorithmes : canaux, temps de calcul, stabilité");
+    connect(m_actionComparaison, &QAction::triggered, this, [this] {
+        m_comparaison->show();
+        m_comparaison->raise();
+        m_comparaison->activateWindow();
+    });
+
+    // Thème sombre de l'interface (la carte garde ses couleurs).
+    m_actionThemeSombre = new QAction("Thème sombre", this);
+    m_actionThemeSombre->setCheckable(true);
+    m_actionThemeSombre->setShortcut(QKeySequence("Ctrl+T"));
+    m_actionThemeSombre->setToolTip("Interface claire ou sombre — Ctrl+T");
+    connect(m_actionThemeSombre, &QAction::toggled, this, &MainWindow::changerTheme);
 
     // Tant qu'aucune carte n'est chargée, ces commandes n'ont pas de sens.
     for (QAction *a : {m_actionRecentrer, m_actionZone, m_actionEffacerZone, m_actionItineraire, m_actionIntersections,
@@ -178,7 +207,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     // ---- Menu ----
     auto *menuFichier = menuBar()->addMenu("&Fichier");
-    menuFichier->addAction(actionOuvrir);
+    menuFichier->addAction(m_actionOuvrir);
     menuFichier->addSeparator();
     menuFichier->addAction("&Quitter", QKeySequence::Quit, this, &QWidget::close);
 
@@ -197,17 +226,18 @@ MainWindow::MainWindow(QWidget *parent)
     menuSimulation->addAction(m_actionAccelerer);
     menuSimulation->addAction(m_actionReinitialiser);
     menuSimulation->addSeparator();
-    menuSimulation->addAction("Comparaison des algorithmes…", this, [this] {
-        m_comparaison->show();
-        m_comparaison->raise();
-    });
+    menuSimulation->addAction(m_actionComparaison);
     menuSimulation->addAction("Exporter les mesures (CSV)…", this, [this] { m_comparaison->exporterAvecDialogue(this); });
 
-    // ---- Barre d'outils (texte seul : plus lisible que des icônes inventées) ----
+    auto *menuAffichage = menuBar()->addMenu("&Affichage");
+    menuAffichage->addAction(m_actionThemeSombre);
+
+    // ---- Barre d'outils, avec icône et texte ----
     auto *barre = addToolBar("Outils");
     barre->setMovable(false);
-    barre->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    barre->addAction(actionOuvrir);
+    barre->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    barre->setContextMenuPolicy(Qt::PreventContextMenu);  // pas de menu « masquer la barre »
+    barre->addAction(m_actionOuvrir);
     barre->addSeparator();
     barre->addAction(m_actionRecentrer);
     barre->addAction(m_actionZone);
@@ -216,24 +246,17 @@ MainWindow::MainWindow(QWidget *parent)
     barre->addAction(m_actionItineraire);
     barre->addAction(m_actionIntersections);
     barre->addAction(m_actionAretes);
+    barre->addSeparator();
+    barre->addAction(m_actionComparaison);
 
     creerBarreTemps();
+    // Icônes posées avant de construire le panneau : ses boutons en ont aussi, et sa largeur
+    // est mesurée icônes comprises (sinon le texte des boutons serait coupé).
+    majIcones();
 
-    // ---- Panneau de contrôle à droite, figé (ni fermable ni détachable) ----
+    // ---- Panneau de contrôle à droite, figé (ni fermable ni détachable), en 3 onglets ----
     auto *dock = new QDockWidget("Contrôles", this);
-    // Zone défilante : sur un petit écran (portable), le panneau reste utilisable.
-    auto *defilement = new QScrollArea;
-    QWidget *panneau = creerPanneau();
-    defilement->setWidget(panneau);
-    defilement->setWidgetResizable(true);
-    defilement->setFrameShape(QFrame::NoFrame);
-    defilement->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    // Largeur = celle dont le panneau a besoin + la barre de défilement verticale :
-    // sinon le texte et les boutons sont coupés à droite.
-    // (qMax : la largeur minimale imposée au panneau compte plus que celle estimée par Qt.)
-    defilement->setMinimumWidth(qMax(panneau->minimumWidth(), panneau->minimumSizeHint().width())
-                                + defilement->verticalScrollBar()->sizeHint().width());
-    dock->setWidget(defilement);
+    dock->setWidget(creerPanneau());
     dock->setFeatures(QDockWidget::NoDockWidgetFeatures);
     addDockWidget(Qt::RightDockWidgetArea, dock);
 
@@ -262,74 +285,110 @@ MainWindow::MainWindow(QWidget *parent)
         m_actionZone->setChecked(false);
         majInfosZone();
     });
+
+    m_aide->setText("Molette : zoom · Clic-glisser : déplacer · Z : tracer la zone de simulation");
+}
+
+void MainWindow::majInvite()
+{
+    // Message d'accueil au centre de la vue, tant qu'une simulation prête n'a pas encore été
+    // lancée : sans lui, on arrive sur des véhicules immobiles sans savoir quoi faire.
+    const bool afficher = m_attendDemarrage && m_actionLecture->isEnabled() && !m_actionLecture->isChecked();
+    const QString titre = afficher ? QString("Appuyez sur Espace pour démarrer la simulation") : QString();
+    m_vue->setInvite(titre, "Molette : zoom · Glisser : déplacer · Z : choisir une zone de simulation");
+}
+
+void MainWindow::majIcones()
+{
+    // Les icônes sont dessinées dans la couleur du texte du thème : on les redessine à chaque
+    // changement de thème (sinon, en thème sombre, des icônes foncées sur fond foncé).
+    using I = Theme::Icone;
+    const QList<QPair<QAction *, I>> icones = {
+        {m_actionOuvrir, I::Ouvrir},         {m_actionRecentrer, I::Recentrer},
+        {m_actionZone, I::Zone},             {m_actionEffacerZone, I::EffacerZone},
+        {m_actionItineraire, I::Itineraire}, {m_actionIntersections, I::Intersections},
+        {m_actionAretes, I::Aretes},         {m_actionComparaison, I::Comparaison},
+        {m_actionRalentir, I::Ralentir},     {m_actionAccelerer, I::Accelerer},
+        {m_actionReinitialiser, I::Reinitialiser},
+    };
+    for (const auto &[action, icone] : icones)
+        action->setIcon(Theme::icone(icone));
+    m_actionLecture->setIcon(Theme::icone(m_actionLecture->isChecked() ? I::Pause : I::Lecture));
+}
+
+void MainWindow::changerTheme(bool sombre)
+{
+    Theme::appliquer(sombre);
+    majIcones();
+    m_comparaison->setThemeSombre(sombre);
+    if (!m_comparaison->mesures().isEmpty())
+        recevoirMesure(m_comparaison->mesures().last());  // couleurs du tableau des résultats
 }
 
 QWidget *MainWindow::creerPanneau()
 {
+    // Panneau rangé en 3 onglets, du plus utilisé au moins utilisé : Simulation (réglages,
+    // état, graphe d'interférences), Coloration (résultats des 4 algorithmes), Carte (carte,
+    // zone, graphe routier, itinéraire, légende). Sous les onglets, l'aide de la vue affichée.
     auto *panneau = new QWidget;
-    panneau->setMinimumWidth(270);
-    auto *layout = new QVBoxLayout(panneau);
-    layout->setSpacing(12);
+    auto *layoutPanneau = new QVBoxLayout(panneau);
+    layoutPanneau->setContentsMargins(6, 6, 6, 6);
+    m_onglets = new QTabWidget;
+    m_onglets->setDocumentMode(true);  // onglets sans cadre, plus légers
+    layoutPanneau->addWidget(m_onglets, 1);
 
-    // -- Infos sur la carte chargée --
-    auto *groupeCarte = new QGroupBox("Carte");
-    m_infosCarte = new QLabel("Aucune carte chargée.");
-    m_infosCarte->setWordWrap(true);
-    m_infosCarte->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    (new QVBoxLayout(groupeCarte))->addWidget(m_infosCarte);
-    layout->addWidget(groupeCarte);
-
-    // -- Zone de simulation : les mêmes actions que la barre d'outils, en boutons --
-    auto *groupeZone = new QGroupBox("Zone de simulation");
-    auto *layoutZone = new QVBoxLayout(groupeZone);
-    m_infosZone = new QLabel;
-    m_infosZone->setWordWrap(true);
-    layoutZone->addWidget(m_infosZone);
-    auto *boutons = new QHBoxLayout;
-    for (QAction *a : {m_actionZone, m_actionEffacerZone}) {
+    // Chaque onglet défile s'il est plus haut que l'écran (petit portable). La largeur du
+    // panneau est celle dont l'onglet le plus large a besoin, plus la barre de défilement :
+    // sinon le texte et les boutons seraient coupés à droite.
+    int largeurPanneau = 0;
+    const auto nouvelOnglet = [this, &largeurPanneau](const QString &titre, QWidget *contenu) {
+        contenu->setMinimumWidth(280);
+        auto *defilement = new QScrollArea;
+        defilement->setWidget(contenu);
+        defilement->setWidgetResizable(true);
+        defilement->setFrameShape(QFrame::NoFrame);
+        defilement->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        // Applique d'abord la feuille de style (marges, coins arrondis) au contenu : sans
+        // cela, la largeur mesurée ne compterait pas ces marges.
+        contenu->ensurePolished();
+        largeurPanneau = std::max(largeurPanneau, std::max(contenu->minimumWidth(), contenu->minimumSizeHint().width())
+                                                      + defilement->verticalScrollBar()->sizeHint().width());
+        m_onglets->addTab(defilement, titre);
+    };
+    const auto nouveauGroupe = [](const QString &titre, QVBoxLayout *&layout) {
+        auto *groupe = new QGroupBox(titre);
+        layout = new QVBoxLayout(groupe);
+        return groupe;
+    };
+    const auto boutonPour = [](QAction *action) {
         auto *bouton = new QToolButton;
-        bouton->setDefaultAction(a);  // le bouton suit l'action : texte, état coché, activé...
+        bouton->setDefaultAction(action);  // le bouton suit l'action : texte, icône, état coché, activé...
+        bouton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         bouton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        boutons->addWidget(bouton);
-    }
-    layoutZone->addLayout(boutons);
-    layout->addWidget(groupeZone);
+        return bouton;
+    };
+    const auto texte = [](const QString &contenu) {
+        auto *label = new QLabel(contenu);
+        label->setWordWrap(true);
+        return label;
+    };
 
-    // -- Graphe routier (étape 2) : taille du graphe et affichage des intersections --
-    auto *groupeGraphe = new QGroupBox("Graphe routier");
-    auto *layoutGraphe = new QVBoxLayout(groupeGraphe);
-    m_infosGraphe = new QLabel("Chargez une carte pour construire le graphe.");
-    m_infosGraphe->setWordWrap(true);
-    layoutGraphe->addWidget(m_infosGraphe);
-    auto *boutonIntersections = new QToolButton;
-    boutonIntersections->setDefaultAction(m_actionIntersections);
-    boutonIntersections->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    layoutGraphe->addWidget(boutonIntersections);
-    layout->addWidget(groupeGraphe);
+    // ===================== Onglet 1 : Simulation =====================
+    auto *simulation = new QWidget;
+    auto *layoutSimulation = new QVBoxLayout(simulation);
+    layoutSimulation->setSpacing(12);
 
-    // -- Itinéraire de test : vérifie visuellement le plus court chemin (Dijkstra / A*) --
-    auto *groupeItineraire = new QGroupBox("Plus court chemin");
-    auto *layoutItineraire = new QVBoxLayout(groupeItineraire);
-    m_infosItineraire = new QLabel("Activez « Itinéraire » puis cliquez deux points.");
-    m_infosItineraire->setWordWrap(true);
-    layoutItineraire->addWidget(m_infosItineraire);
-    auto *boutonItineraire = new QToolButton;
-    boutonItineraire->setDefaultAction(m_actionItineraire);
-    boutonItineraire->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    layoutItineraire->addWidget(boutonItineraire);
-    layout->addWidget(groupeItineraire);
-
-    // -- Simulation (étape 3) : réglages. La portée et l'intervalle de recalcul
-    //    s'appliquent tout de suite ; le nombre de véhicules et la graine
-    //    demandent de relancer (bouton « Appliquer »). --
-    auto *groupeSimulation = new QGroupBox("Simulation");
-    auto *layoutSimulation = new QVBoxLayout(groupeSimulation);
+    // Réglages (étape 3). La portée et l'intervalle de recalcul s'appliquent tout de suite ;
+    // le nombre de véhicules et la graine demandent de relancer (bouton « Appliquer »).
+    QVBoxLayout *layoutReglages = nullptr;
+    QGroupBox *groupeReglages = nouveauGroupe("Réglages", layoutReglages);
     auto *formulaire = new QFormLayout;
     m_nombreVehicules = new QSpinBox;
     m_nombreVehicules->setRange(10, 10000);
     m_nombreVehicules->setSingleStep(100);
     m_nombreVehicules->setValue(2000);  // au moins 2000 exigés par le sujet
     m_nombreVehicules->setGroupSeparatorShown(true);
+    m_nombreVehicules->setToolTip("Nombre de véhicules simulés (au moins 2000 demandés par le sujet)");
     formulaire->addRow("Véhicules", m_nombreVehicules);
     m_rayon = new QDoubleSpinBox;
     m_rayon->setRange(20, 2000);
@@ -337,7 +396,7 @@ QWidget *MainWindow::creerPanneau()
     m_rayon->setDecimals(0);
     m_rayon->setSuffix(" m");
     m_rayon->setValue(300);
-    m_rayon->setToolTip("Portée radio R commune à tous les véhicules");
+    m_rayon->setToolTip("Portée radio R commune à tous les véhicules (s'applique tout de suite)");
     formulaire->addRow("Portée R", m_rayon);
     m_intervalle = new QDoubleSpinBox;
     m_intervalle->setRange(0.2, 30);
@@ -352,14 +411,12 @@ QWidget *MainWindow::creerPanneau()
     m_graine->setValue(42);
     m_graine->setToolTip("Même graine = même scénario : utile pour comparer les algorithmes");
     formulaire->addRow("Graine aléatoire", m_graine);
-    layoutSimulation->addLayout(formulaire);
+    layoutReglages->addLayout(formulaire);
     auto *boutonAppliquer = new QPushButton("Appliquer et relancer");
+    boutonAppliquer->setToolTip("Recrée la simulation avec ce nombre de véhicules et cette graine");
     connect(boutonAppliquer, &QPushButton::clicked, this, &MainWindow::lancerSimulation);
-    layoutSimulation->addWidget(boutonAppliquer);
-    m_infosSimulation = new QLabel("Chargez une carte pour lancer la simulation.");
-    m_infosSimulation->setWordWrap(true);
-    layoutSimulation->addWidget(m_infosSimulation);
-    layout->addWidget(groupeSimulation);
+    layoutReglages->addWidget(boutonAppliquer);
+    layoutSimulation->addWidget(groupeReglages);
 
     connect(m_rayon, &QDoubleSpinBox::valueChanged, this, [this](double rayon) {
         QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, rayon] { moteur->setRayon(rayon); }, Qt::QueuedConnection);
@@ -369,66 +426,165 @@ QWidget *MainWindow::creerPanneau()
                                   Qt::QueuedConnection);
     });
 
-    // -- Graphe d'interférences (étape 4) : statistiques demandées par le cahier --
-    auto *groupeInterference = new QGroupBox("Graphe d'interférences");
-    auto *layoutInterference = new QVBoxLayout(groupeInterference);
-    m_infosInterference = new QLabel("Pas encore calculé.");
-    m_infosInterference->setWordWrap(true);
-    layoutInterference->addWidget(m_infosInterference);
-    auto *boutonAretes = new QToolButton;
-    boutonAretes->setDefaultAction(m_actionAretes);
-    boutonAretes->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    layoutInterference->addWidget(boutonAretes);
-    layout->addWidget(groupeInterference);
+    // État de la simulation en cours.
+    QVBoxLayout *layoutEtat = nullptr;
+    QGroupBox *groupeEtat = nouveauGroupe("En ce moment", layoutEtat);
+    m_infosSimulation = texte("Chargez une carte pour lancer la simulation.");
+    layoutEtat->addWidget(m_infosSimulation);
+    layoutSimulation->addWidget(groupeEtat);
 
-    // -- Coloration (étape 5) : algorithme affiché, résultats des deux algorithmes --
-    auto *groupeColoration = new QGroupBox("Coloration (canaux radio)");
-    auto *layoutColoration = new QVBoxLayout(groupeColoration);
+    // Graphe d'interférences (étape 4) : statistiques demandées par le cahier.
+    QVBoxLayout *layoutInterference = nullptr;
+    QGroupBox *groupeInterference = nouveauGroupe("Graphe d'interférences", layoutInterference);
+    m_infosInterference = texte("Pas encore calculé.");
+    layoutInterference->addWidget(m_infosInterference);
+    layoutInterference->addWidget(boutonPour(m_actionAretes));
+    layoutSimulation->addWidget(groupeInterference);
+    layoutSimulation->addStretch();  // pousse les groupes vers le haut
+    nouvelOnglet("Simulation", simulation);
+
+    // ===================== Onglet 2 : Coloration =====================
+    auto *coloration = new QWidget;
+    auto *layoutColoration = new QVBoxLayout(coloration);
+    layoutColoration->setSpacing(12);
+
+    QVBoxLayout *layoutResultats = nullptr;
+    QGroupBox *groupeResultats = nouveauGroupe("Canaux radio (étape 5)", layoutResultats);
     auto *ligneAlgo = new QHBoxLayout;
     ligneAlgo->addWidget(new QLabel("Couleurs affichées :"));
     m_algoAffiche = new QComboBox;
     for (Coloration::Algo algo : Coloration::TOUS_LES_ALGOS)
         m_algoAffiche->addItem(Coloration::nom(algo), int(algo));
     m_algoAffiche->setCurrentIndex(int(Coloration::Algo::WelshPowell));  // un des deux algorithmes obligatoires
+    m_algoAffiche->setToolTip("Algorithme dont les couleurs (canaux) sont dessinées sur la carte");
     ligneAlgo->addWidget(m_algoAffiche, 1);
-    layoutColoration->addLayout(ligneAlgo);
+    layoutResultats->addLayout(ligneAlgo);
+
+    // Résultats du dernier recalcul : une ligne par algorithme. Plus lisible que du texte :
+    // on compare les colonnes d'un coup d'œil. Cliquer une ligne affiche ses couleurs.
+    m_tableauColoration = new QTableWidget(Coloration::NOMBRE_ALGOS, 5);
+    m_tableauColoration->setHorizontalHeaderLabels({"Algorithme", "Canaux", "ms", "S", ""});
+    m_tableauColoration->horizontalHeaderItem(1)->setToolTip("Nombre de canaux radio utilisés (k) : moins = mieux");
+    m_tableauColoration->horizontalHeaderItem(2)->setToolTip("Temps de calcul de la coloration, en millisecondes");
+    m_tableauColoration->horizontalHeaderItem(3)->setToolTip(
+        "Stabilité S : part des véhicules qui gardent leur canal depuis le recalcul précédent (1 = aucun changement)");
+    m_tableauColoration->horizontalHeaderItem(4)->setToolTip("Validité : deux voisins n'ont jamais le même canal");
+    m_tableauColoration->verticalHeader()->hide();
+    m_tableauColoration->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    m_tableauColoration->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_tableauColoration->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_tableauColoration->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_tableauColoration->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_tableauColoration->setFocusPolicy(Qt::NoFocus);
+    m_tableauColoration->setShowGrid(false);
+    m_tableauColoration->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_tableauColoration->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    for (Coloration::Algo algo : Coloration::TOUS_LES_ALGOS) {
+        const int ligne = int(algo);
+        // Petit carré de la couleur de l'algorithme dans les courbes de la fenêtre Comparaison.
+        QPixmap carre(10, 10);
+        carre.fill(FenetreComparaison::couleurAlgo(algo));
+        auto *nom = new QTableWidgetItem(QIcon(carre), Coloration::nom(algo));
+        m_tableauColoration->setItem(ligne, 0, nom);
+        for (int colonne = 1; colonne < 5; ++colonne) {
+            auto *case_ = new QTableWidgetItem("–");
+            case_->setTextAlignment(Qt::AlignCenter);
+            m_tableauColoration->setItem(ligne, colonne, case_);
+        }
+    }
+    // Hauteur exacte : en-tête + une ligne par algorithme + cadre (pas de ligne vide en dessous).
+    m_tableauColoration->setFixedHeight(m_tableauColoration->horizontalHeader()->sizeHint().height()
+                                        + Coloration::NOMBRE_ALGOS * m_tableauColoration->verticalHeader()->defaultSectionSize()
+                                        + 2 * m_tableauColoration->frameWidth() + 2);
+    layoutResultats->addWidget(m_tableauColoration);
+    auto *noteTableau = texte("En gras : le moins de canaux. Cliquez une ligne pour afficher ses couleurs.");
+    noteTableau->setForegroundRole(QPalette::PlaceholderText);
+    layoutResultats->addWidget(noteTableau);
+    m_legendeCanaux = new QLabel;
+    layoutResultats->addWidget(m_legendeCanaux);
+    layoutColoration->addWidget(groupeResultats);
+
+    // Liste déroulante et tableau restent d'accord : changer l'un change l'autre.
     connect(m_algoAffiche, &QComboBox::currentIndexChanged, this, [this] {
         const auto algo = static_cast<Coloration::Algo>(m_algoAffiche->currentData().toInt());
         QMetaObject::invokeMethod(m_moteur, [moteur = m_moteur, algo] { moteur->setAlgoAffiche(algo); },
                                   Qt::QueuedConnection);
+        const QSignalBlocker bloque(m_tableauColoration);  // évite l'aller-retour tableau -> liste
+        m_tableauColoration->selectRow(int(algo));
         if (!m_comparaison->mesures().isEmpty())
             recevoirMesure(m_comparaison->mesures().last());  // met à jour indicateurs et légende
     });
-    m_infosColoration = new QLabel("Pas encore calculée.");
-    m_infosColoration->setWordWrap(true);
-    layoutColoration->addWidget(m_infosColoration);
-    m_legendeCanaux = new QLabel;
-    layoutColoration->addWidget(m_legendeCanaux);
-    auto *boutonsColoration = new QHBoxLayout;
-    auto *boutonComparaison = new QPushButton("Comparaison…");
-    boutonComparaison->setToolTip("Tableau et courbes : nombre de canaux, temps de calcul, stabilité");
-    connect(boutonComparaison, &QPushButton::clicked, this, [this] {
-        m_comparaison->show();
-        m_comparaison->raise();
-        m_comparaison->activateWindow();
+    connect(m_tableauColoration, &QTableWidget::itemSelectionChanged, this, [this] {
+        const QList<QTableWidgetItem *> choix = m_tableauColoration->selectedItems();
+        if (!choix.isEmpty())
+            m_algoAffiche->setCurrentIndex(choix.first()->row());
     });
-    auto *boutonCsv = new QPushButton("Exporter CSV…");
-    connect(boutonCsv, &QPushButton::clicked, this, [this] { m_comparaison->exporterAvecDialogue(this); });
-    boutonsColoration->addWidget(boutonComparaison);
-    boutonsColoration->addWidget(boutonCsv);
-    layoutColoration->addLayout(boutonsColoration);
-    layout->addWidget(groupeColoration);
+    m_tableauColoration->selectRow(m_algoAffiche->currentIndex());
 
-    // -- Légende : un petit trait de la couleur et de l'épaisseur de chaque type de route --
-    auto *groupeLegende = new QGroupBox("Légende");
-    auto *layoutLegende = new QVBoxLayout(groupeLegende);
+    QVBoxLayout *layoutAnalyse = nullptr;
+    QGroupBox *groupeAnalyse = nouveauGroupe("Analyse", layoutAnalyse);
+    layoutAnalyse->addWidget(texte("Courbes k(t), temps de calcul et S(t) des 4 algorithmes depuis le début, "
+                                   "et export des mesures pour un tableur."));
+    auto *boutonsAnalyse = new QHBoxLayout;
+    boutonsAnalyse->addWidget(boutonPour(m_actionComparaison));
+    auto *boutonCsv = new QPushButton("Exporter CSV…");
+    boutonCsv->setToolTip("Une ligne par recalcul : canaux, temps et stabilité de chaque algorithme");
+    connect(boutonCsv, &QPushButton::clicked, this, [this] { m_comparaison->exporterAvecDialogue(this); });
+    boutonsAnalyse->addWidget(boutonCsv);
+    layoutAnalyse->addLayout(boutonsAnalyse);
+    layoutColoration->addWidget(groupeAnalyse);
+    layoutColoration->addStretch();
+    nouvelOnglet("Coloration", coloration);
+
+    // ===================== Onglet 3 : Carte =====================
+    auto *carte = new QWidget;
+    auto *layoutCarte = new QVBoxLayout(carte);
+    layoutCarte->setSpacing(12);
+
+    QVBoxLayout *layoutInfosCarte = nullptr;
+    QGroupBox *groupeCarte = nouveauGroupe("Carte", layoutInfosCarte);
+    m_infosCarte = texte("Aucune carte chargée.");
+    m_infosCarte->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    layoutInfosCarte->addWidget(m_infosCarte);
+    layoutCarte->addWidget(groupeCarte);
+
+    // Zone de simulation : les mêmes actions que la barre d'outils, en boutons.
+    QVBoxLayout *layoutZone = nullptr;
+    QGroupBox *groupeZone = nouveauGroupe("Zone de simulation", layoutZone);
+    m_infosZone = texte(QString());
+    layoutZone->addWidget(m_infosZone);
+    auto *boutonsZone = new QHBoxLayout;
+    boutonsZone->addWidget(boutonPour(m_actionZone));
+    boutonsZone->addWidget(boutonPour(m_actionEffacerZone));
+    layoutZone->addLayout(boutonsZone);
+    layoutCarte->addWidget(groupeZone);
+
+    // Graphe routier (étape 2) : taille du graphe et affichage des intersections.
+    QVBoxLayout *layoutGraphe = nullptr;
+    QGroupBox *groupeGraphe = nouveauGroupe("Graphe routier", layoutGraphe);
+    m_infosGraphe = texte("Chargez une carte pour construire le graphe.");
+    layoutGraphe->addWidget(m_infosGraphe);
+    layoutGraphe->addWidget(boutonPour(m_actionIntersections));
+    layoutCarte->addWidget(groupeGraphe);
+
+    // Itinéraire de test : vérifie visuellement le plus court chemin (Dijkstra / A*).
+    QVBoxLayout *layoutItineraire = nullptr;
+    QGroupBox *groupeItineraire = nouveauGroupe("Plus court chemin", layoutItineraire);
+    m_infosItineraire = texte("Activez « Itinéraire » puis cliquez deux points.");
+    layoutItineraire->addWidget(m_infosItineraire);
+    layoutItineraire->addWidget(boutonPour(m_actionItineraire));
+    layoutCarte->addWidget(groupeItineraire);
+
+    // Légende : un petit trait de la couleur et de l'épaisseur de chaque type de route.
+    QVBoxLayout *layoutLegende = nullptr;
+    QGroupBox *groupeLegende = nouveauGroupe("Légende des routes", layoutLegende);
     const QList<QPair<TypeRoute, QString>> types = {
         {TypeRoute::Autoroute, "Autoroute, voie rapide"},
         {TypeRoute::Principale, "Route principale"},
         {TypeRoute::Secondaire, "Route secondaire"},
         {TypeRoute::Locale, "Rue, route locale"},
     };
-    for (const auto &[type, texte] : types) {
+    for (const auto &[type, nom] : types) {
         QPixmap trait(28, 12);
         trait.fill(Qt::transparent);
         QPainter p(&trait);
@@ -441,18 +597,21 @@ QWidget *MainWindow::creerPanneau()
         auto *icone = new QLabel;
         icone->setPixmap(trait);
         ligne->addWidget(icone);
-        ligne->addWidget(new QLabel(texte), 1);
+        ligne->addWidget(new QLabel(nom), 1);
         layoutLegende->addLayout(ligne);
     }
-    layout->addWidget(groupeLegende);
+    layoutCarte->addWidget(groupeLegende);
+    layoutCarte->addStretch();
+    nouvelOnglet("Carte", carte);
 
     // -- Aide rapide pour se déplacer sur la carte --
-    auto *aide = new QLabel("Molette : zoom   ·   Clic-glisser : déplacer");
-    aide->setStyleSheet("color: palette(mid);");
-    aide->setWordWrap(true);
-    layout->addWidget(aide);
+    m_aide = texte(QString());
+    m_aide->setForegroundRole(QPalette::PlaceholderText);  // gris discret, lisible dans les deux thèmes
+    m_aide->setContentsMargins(4, 0, 4, 0);
+    layoutPanneau->addWidget(m_aide);
 
-    layout->addStretch();  // pousse les groupes vers le haut
+    panneau->setMinimumWidth(largeurPanneau + layoutPanneau->contentsMargins().left()
+                             + layoutPanneau->contentsMargins().right());
     majInfosZone();
     return panneau;
 }
@@ -476,15 +635,16 @@ bool MainWindow::chargerCarte(const QString &chemin)
 
     m_carte = std::move(carte);
     m_vue->afficherCarte(m_carte);
+    const QFileInfo infoCarte(chemin);
     const qint64 ms = chrono.elapsed();
     QApplication::restoreOverrideCursor();
 
     const QLocale fr;
     m_infosCarte->setText(QString("<b>%1</b><br>%2 routes · %3 nœuds")
-                              .arg(QFileInfo(chemin).fileName().toHtmlEscaped(),
+                              .arg(infoCarte.fileName().toHtmlEscaped(),
                                    fr.toString(m_carte.routes.size()),
                                    fr.toString(m_carte.noeuds.size())));
-    setWindowTitle(QString("Simulateur V2V — %1").arg(QFileInfo(chemin).fileName()));
+    setWindowTitle(QString("Simulateur V2V — %1").arg(infoCarte.fileName()));
     statusBar()->showMessage(QString("Carte chargée en %1 ms").arg(ms));
 
     for (QAction *a : {m_actionRecentrer, m_actionZone, m_actionEffacerZone, m_actionItineraire, m_actionIntersections,
@@ -509,7 +669,8 @@ void MainWindow::creerBarreTemps()
     // Barre du bas, comme sur la maquette du cahier des charges : contrôle du temps.
     auto *barre = new QToolBar("Contrôle du temps", this);
     barre->setMovable(false);
-    barre->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    barre->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    barre->setContextMenuPolicy(Qt::PreventContextMenu);
     addToolBar(Qt::BottomToolBarArea, barre);
 
     barre->addAction(m_actionLecture);
@@ -556,7 +717,16 @@ void MainWindow::lancerSimulation()
     m_comparaison->vider();
     const int generation = ++m_generation;  // tout message de l'ancienne simulation sera ignoré
     m_infosInterference->setText("Pas encore calculé.");
-    m_infosColoration->setText("Pas encore calculée.");
+    // Tableau des résultats remis à blanc : texte, gras, couleur et bulle d'aide (sinon un
+    // tiret garderait par exemple la bulle « Coloration valide » du calcul précédent).
+    for (int ligne = 0; ligne < m_tableauColoration->rowCount(); ++ligne)
+        for (int colonne = 1; colonne < m_tableauColoration->columnCount(); ++colonne) {
+            QTableWidgetItem *caseTableau = m_tableauColoration->item(ligne, colonne);
+            caseTableau->setText("–");
+            caseTableau->setFont(m_tableauColoration->font());
+            caseTableau->setForeground(QBrush());
+            caseTableau->setToolTip(QString());
+        }
     m_indicateurs->clear();
     majLegendeCanaux(0);
 
@@ -584,6 +754,8 @@ void MainWindow::lancerSimulation()
         Qt::QueuedConnection);
     if (!grapheVide)
         statusBar()->showMessage("Simulation prête : appuyez sur « Démarrer » (Espace)");
+    m_attendDemarrage = true;
+    majInvite();
 }
 
 void MainWindow::recevoirInstantane(const Instantane &instantane)
@@ -645,16 +817,30 @@ void MainWindow::recevoirMesure(const Mesure &mesure)
                                           fr.toString(s.degreMoyen, 'f', 2), fr.toString(s.degreMax),
                                           fr.toString(s.dureeMs, 'f', 2)));
 
-    const auto ligne = [&](const QString &nom, const MesureAlgo &a) {
-        return QString("<b>%1</b> : %2 canaux · %3 ms · S = %4 · %5")
-            .arg(nom, fr.toString(a.couleurs), fr.toString(a.dureeMs, 'f', 2), fr.toString(a.stabilite, 'f', 2),
-                 a.valide ? "<span style='color:#15803d'>valide</span>"
-                          : QString("<span style='color:#b91c1c'>%1 conflits</span>").arg(a.conflits));
-    };
-    QStringList lignes;
+    // Tableau des résultats : en gras (couleur d'accent) le plus petit nombre de canaux,
+    // c'est-à-dire le meilleur algorithme sur ce critère (il peut y en avoir plusieurs).
+    int minimum = std::numeric_limits<int>::max();
     for (Coloration::Algo a : Coloration::TOUS_LES_ALGOS)
-        lignes << ligne(Coloration::nom(a), mesure.algo(a));
-    m_infosColoration->setText(lignes.join("<br>"));
+        minimum = std::min(minimum, mesure.algo(a).couleurs);
+    const QColor vert = Theme::estSombre() ? QColor(0x4A, 0xDE, 0x80) : QColor(0x15, 0x80, 0x3D);
+    const QColor rouge = Theme::estSombre() ? QColor(0xF8, 0x71, 0x71) : QColor(0xB9, 0x1C, 0x1C);
+    for (Coloration::Algo a : Coloration::TOUS_LES_ALGOS) {
+        const MesureAlgo &m = mesure.algo(a);
+        const int ligne = int(a);
+        QTableWidgetItem *canaux = m_tableauColoration->item(ligne, 1);
+        canaux->setText(fr.toString(m.couleurs));
+        QFont police = canaux->font();
+        police.setBold(m.couleurs == minimum);
+        canaux->setFont(police);
+        canaux->setForeground(m.couleurs == minimum ? QBrush(Theme::accent()) : QBrush());
+        m_tableauColoration->item(ligne, 2)->setText(fr.toString(m.dureeMs, 'f', 2));
+        m_tableauColoration->item(ligne, 3)->setText(fr.toString(m.stabilite, 'f', 2));
+        QTableWidgetItem *validite = m_tableauColoration->item(ligne, 4);
+        validite->setText(m.valide ? "✓" : QString("✗ %1").arg(m.conflits));
+        validite->setForeground(m.valide ? vert : rouge);
+        validite->setToolTip(m.valide ? "Coloration valide : aucune arête entre deux véhicules de même canal"
+                                      : QString("%1 conflits : arêtes entre deux véhicules de même canal").arg(m.conflits));
+    }
 
     // Barre d'état : indicateurs de l'algorithme dont les couleurs sont affichées.
     const auto algo = static_cast<Coloration::Algo>(m_algoAffiche->currentData().toInt());
@@ -672,21 +858,27 @@ void MainWindow::majLegendeCanaux(int nombre)
         m_legendeCanaux->clear();
         return;
     }
-    // Une pastille par canal utilisé, dans la couleur des véhicules sur la carte.
-    constexpr int maxAffiches = 16, taille = 14;
+    // Une pastille par canal utilisé, dans la couleur des véhicules sur la carte, 12 par ligne
+    // (une seule longue ligne déborderait du panneau dès 16 canaux).
+    constexpr int maxAffiches = 36, parLigne = 12, taille = 14;
     const int affiches = std::min(nombre, maxAffiches);
-    QPixmap image(affiches * (taille + 3), taille);
+    const int lignes = (affiches + parLigne - 1) / parLigne;
+    const qreal dpr = devicePixelRatioF();
+    QPixmap image(qCeil(std::min(affiches, parLigne) * (taille + 3) * dpr), qCeil(lignes * (taille + 3) * dpr));
+    image.setDevicePixelRatio(dpr);  // net sur un écran agrandi (125 %, Retina...)
     image.fill(Qt::transparent);
     QPainter p(&image);
     p.setRenderHint(QPainter::Antialiasing);
     for (int c = 0; c < affiches; ++c) {
         p.setPen(QPen(Qt::white, 1.5));
         p.setBrush(MapView::couleurCanal(c));
-        p.drawEllipse(QRectF(c * (taille + 3) + 1, 1, taille - 2, taille - 2));
+        p.drawEllipse(QRectF(c % parLigne * (taille + 3) + 1, c / parLigne * (taille + 3) + 1, taille - 2, taille - 2));
     }
     p.end();
     m_legendeCanaux->setPixmap(image);
-    m_legendeCanaux->setToolTip(QString("%1 canaux radio utilisés%2").arg(nombre).arg(nombre > maxAffiches ? " (16 premiers affichés)" : ""));
+    m_legendeCanaux->setToolTip(QString("%1 canaux radio utilisés%2")
+                                    .arg(nombre)
+                                    .arg(nombre > maxAffiches ? QString(" (%1 premiers affichés)").arg(maxAffiches) : QString()));
 }
 
 void MainWindow::construireGraphe()

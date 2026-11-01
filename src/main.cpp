@@ -10,6 +10,7 @@
 #include <QTimer>
 
 #include "ui/MainWindow.h"
+#include "ui/Theme.h"
 
 int main(int argc, char *argv[])
 {
@@ -18,6 +19,8 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName("Simulateur V2V");
     // Nombres à la française partout (1 234,5) : QLocale() renverra ce réglage.
     QLocale::setDefault(QLocale(QLocale::French, QLocale::France));
+    // Style moderne (Fusion), identique sur tous les systèmes, en thème clair (voir ui/Theme.h).
+    Theme::appliquer(false);
 
     MainWindow fenetre;
     fenetre.showMaximized();  // plein écran : s'adapte à la taille de l'écran de chacun

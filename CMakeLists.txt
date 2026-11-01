@@ -63,6 +63,9 @@ qt_add_executable(v2v-simulator WIN32 MACOSX_BUNDLE
     # Fenêtre de comparaison des algorithmes (tableau + courbes)
     src/ui/FenetreComparaison.h
     src/ui/FenetreComparaison.cpp
+    # Style de l'interface : thème clair/sombre et icônes dessinées par le programme
+    src/ui/Theme.h
+    src/ui/Theme.cpp
     # Affichage de la carte (zoom, déplacement, zone, itinéraire, véhicules, arêtes)
     src/map/MapView.h
     src/map/MapView.cpp

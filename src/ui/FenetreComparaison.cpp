@@ -101,6 +101,17 @@ FenetreComparaison::FenetreComparaison(QWidget *parent)
     majTableau();
 }
 
+void FenetreComparaison::setThemeSombre(bool sombre)
+{
+    for (Courbes *c : {&m_couleurs, &m_durees, &m_stabilites}) {
+        c->graphique->setTheme(sombre ? QChart::ChartThemeDark : QChart::ChartThemeLight);
+        // Le thème redonne ses propres couleurs aux courbes : on remet celles des algorithmes,
+        // pour garder la même couleur partout (tableau du panneau, courbes, légende).
+        for (Coloration::Algo algo : Coloration::TOUS_LES_ALGOS)
+            c->series[static_cast<int>(algo)]->setPen(QPen(couleurAlgo(algo), 2));
+    }
+}
+
 FenetreComparaison::Courbes FenetreComparaison::creerGraphique(const QString &titre, const QString &uniteY)
 {
     Courbes c;

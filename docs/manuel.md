@@ -109,10 +109,17 @@ openstreetmap.org (*Exporter*) : le lecteur ignore tout ce qui n'est pas une rou
 | Zone | Contenu |
 |---|---|
 | Centre | la carte : routes (gris, plus foncé = plus importante), véhicules (pastille de la couleur de leur canal), arêtes d'interférence |
-| Haut | barre d'outils : ouvrir une carte, recentrer, zone, itinéraire, intersections, arêtes |
-| Droite | panneau de contrôle : carte, zone, graphe routier, plus court chemin, simulation, graphe d'interférences, coloration, légende |
+| Haut | barre d'outils avec icônes : ouvrir une carte, recentrer, zone, effacer la zone, itinéraire, intersections, arêtes, comparaison |
+| Droite | panneau de contrôle en 3 onglets : **Simulation** (réglages, état, graphe d'interférences), **Coloration** (tableau des 4 algorithmes, canaux utilisés, comparaison, export), **Carte** (carte chargée, zone, graphe routier, plus court chemin, légende des routes) ; en dessous, les gestes de souris |
 | Bas | barre de contrôle du temps : démarrer/pause, ralentir, vitesse (×1...), accélérer, réinitialiser, temps simulé, images par seconde |
 | Barre d'état | messages, indicateurs de la coloration affichée (canaux, temps, stabilité, validité), coordonnées GPS sous la souris |
+
+Tant que la simulation n'a pas été démarrée (au lancement, après *Appliquer et relancer* ou *Réinitialiser*), un
+message au centre de la carte rappelle d'appuyer sur Espace. Dans l'onglet *Coloration*, le tableau donne pour
+chaque algorithme le nombre de canaux, le temps de calcul, la stabilité et la validité (✓ / ✗) ; le plus petit
+nombre de canaux est en gras, et cliquer une ligne affiche les couleurs de cet algorithme sur la carte.
+*Affichage > Thème sombre* (**Ctrl+T**) passe l'interface en couleurs sombres ; la carte garde ses couleurs,
+choisies pour que les canaux restent lisibles.
 
 ### 4.2 Se déplacer sur la carte
 
@@ -195,7 +202,7 @@ En Python : `pandas.read_csv("mesures.csv", sep=";", decimal=",")`.
 | Z | choisir la zone | Ctrl+R | réinitialiser |
 | Suppr | effacer la zone | E | arêtes d'interférence |
 | I | itinéraire | G | intersections |
-| Échap | annuler le tracé de zone | | |
+| Échap | annuler le tracé de zone | Ctrl+T | thème sombre |
 
 ## 5. Architecture du code
 
@@ -210,7 +217,7 @@ Le code suit les cinq étapes du sujet ; chaque module est une petite bibliothè
 | Simulation (`src/simulation`) | `v2v-simulation` | `Simulation`, `Vehicule`, `ParametresSimulation` | graphe routier |
 | Interférences (`src/interference`) | `v2v-interference` | `GrapheInterference`, `StatsInterference` | Qt Core |
 | Coloration (`src/coloring`) | `v2v-coloration` | `Coloration::colorer`, `estValide`, `stabilite` | Qt Core |
-| Interface (`src/ui`, `src/map/MapView`) | application | `MainWindow`, `MoteurSimulation`, `FenetreComparaison`, `MapView` | tous, Qt Widgets, Charts |
+| Interface (`src/ui`, `src/map/MapView`) | application | `MainWindow`, `MoteurSimulation`, `FenetreComparaison`, `MapView`, `Theme` | tous, Qt Widgets, Charts |
 
 Les modules de calcul n'utilisent pas Qt Widgets : ils peuvent tourner sans interface (tests, outil d'étude).
 
